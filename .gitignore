@@ -14,3 +14,6 @@
 ## IDE
 .idea/
 .vscode/
+
+## Launch settings (local debug only — contains connection strings)
+**/Properties/launchSettings.json

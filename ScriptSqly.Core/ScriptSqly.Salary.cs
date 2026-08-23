@@ -1596,13 +1596,24 @@ BEGIN
  SET NOCOUNT ON;
  IF @EFFECTIVE_FROM IS NULL OR @EFFECTIVE_FROM%100<>1 OR @EFFECTIVE_FROM/10000 NOT BETWEEN 1300 AND 1600 OR (@EFFECTIVE_FROM/100)%100 NOT BETWEEN 1 AND 12
   THROW 51105,N'تاریخ اثر باید روز اول یک ماه شمسی معتبر باشد.',1;
+ -- وضعیت هر دو ریل نشان داده می‌شود، نه فقط بیمه: این Procedure تنها جایی است
+ -- که اپراتور پیش از اعمال قاعده نگاه می‌کند، و اگر فقط ریل بیمه را ببیند
+ -- تصور می‌کند مالیات هم حل شده — در حالی که خاموش کردن تنهای بیمه، مالیات را
+ -- زیاد می‌کند (بیمه‌ی سهم کارگرِ کسرشدنی از مبنای مالیات کوچک‌تر می‌شود).
  SELECT DB_NAME() DATABASE_NAME,C.CFG_VALUE OPT_IN_VALUE,
         CASE WHEN C.CFG_VALUE=N'APPROVED:'+DB_NAME() THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END IS_TARGET_APPROVED,
         @EFFECTIVE_FROM EFFECTIVE_FROM,
-        TRY_CAST((SELECT CFG_VALUE FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'INS_NON_SUBJECT_EFFECTIVE_FROM') AS BIGINT) CURRENT_RULE_EFFECTIVE_FROM
+        TRY_CAST((SELECT CFG_VALUE FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'INS_NON_SUBJECT_EFFECTIVE_FROM') AS BIGINT) CURRENT_RULE_EFFECTIVE_FROM,
+        TRY_CAST((SELECT CFG_VALUE FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'TAX_NON_SUBJECT_EFFECTIVE_FROM') AS BIGINT) CURRENT_TAX_RULE_EFFECTIVE_FROM
  FROM dbo.PAY2_CONFIG C WHERE C.CFG_KEY=N'INS_NON_SUBJECT_OPT_IN';
 
- SELECT I.ITEM_ID,I.ITEM_CODE,I.ITEM_NAME,I.INS_SUBJECT CURRENT_INS_SUBJECT,I.TAX_SUBJECT UNCHANGED_TAX_SUBJECT
+ -- CURRENT_TAX_SUBJECT مقدار خام PAY2_ITEM_DEF است و EFFECTIVE_TAX_SUBJECT
+ -- چیزی که موتور واقعاً اعمال می‌کند؛ این دو وقتی کلید مالیات روشن باشد
+ -- فرق می‌کنند، چون موتور TAX_SUBJECT را در زمان محاسبه صفر می‌کند و
+ -- PAY2_ITEM_DEF را دست نمی‌زند.
+ DECLARE @TAX_RULE BIGINT=ISNULL(TRY_CAST((SELECT CFG_VALUE FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'TAX_NON_SUBJECT_EFFECTIVE_FROM') AS BIGINT),0);
+ SELECT I.ITEM_ID,I.ITEM_CODE,I.ITEM_NAME,I.INS_SUBJECT CURRENT_INS_SUBJECT,I.TAX_SUBJECT CURRENT_TAX_SUBJECT,
+        CAST(CASE WHEN @TAX_RULE>0 AND @EFFECTIVE_FROM/100>=@TAX_RULE/100 THEN 0 ELSE I.TAX_SUBJECT END AS bit) EFFECTIVE_TAX_SUBJECT
  FROM dbo.PAY2_ITEM_DEF I WHERE I.ITEM_CODE IN('SHIFT','OT_NORMAL','OT_HOLIDAY','OT_ADMIN') ORDER BY I.ITEM_CODE;
 
  -- همه Overrideها نمایش داده می‌شوند؛ IS_BLOCKING فقط جاری/آینده را مشخص می‌کند.
@@ -1677,6 +1688,10 @@ BEGIN
   WHERE CFG_KEY=N'INS_NON_SUBJECT_EFFECTIVE_FROM';
 
   -- مجوز یک‌بارمصرف است و در همان تراکنش مصرف می‌شود؛ TAX_SUBJECT و تاریخچه Run دست‌نخورده می‌مانند.
+  -- «دست‌نخورده ماندن TAX_SUBJECT» یعنی این Procedure ستون PAY2_ITEM_DEF را بازنویسی نمی‌کند،
+  -- نه اینکه مالیات این اقلام هرگز قابل خاموش کردن نیست: برای مالیات کلید جداگانه‌ی
+  -- TAX_NON_SUBJECT_EFFECTIVE_FROM وجود دارد که موتور در زمان محاسبه اعمالش می‌کند.
+  -- توجه: روشن کردن تنهای همین قاعده‌ی بیمه، مالیات را زیاد می‌کند نه کم.
   UPDATE dbo.PAY2_CONFIG
   SET CFG_VALUE=N'DISABLED',CHANGED_BY=@APPLIED_BY,CHANGED_AT=GETDATE(),
       CHANGE_NOTE=CONCAT(N'Opt-in بیمه برای SHIFT/OT در تاریخ اثر ',@EFFECTIVE_FROM,N' روی دیتابیس ',DB_NAME(),N' اعمال و مجوز مصرف شد.')

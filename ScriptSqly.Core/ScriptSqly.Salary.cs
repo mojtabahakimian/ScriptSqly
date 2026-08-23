@@ -1462,6 +1462,17 @@ IF NOT EXISTS(SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'INS_NON_SUBJECT_EFFE
  VALUES(N'INS_NON_SUBJECT_EFFECTIVE_FROM',N'0',NULL,N'0',N'INSURANCE',N'تاریخ اثر عدم مشمولیت شیفت و اضافه‌کار',
         N'تاریخ شمسی روز اول ماه؛ فقط Procedure تأییدشده Opt-in آن را مقداردهی می‌کند.',NULL,N'DATE',1);
 
+-- قرینه‌ی مالیاتیِ قاعده‌ی بالا. بدون این کلید، خاموش کردن مشمولیت بیمه‌ی
+-- شیفت/اضافه‌کار مالیات را *بیشتر* می‌کند نه کمتر: مبنای مالیات همان اقلام را
+-- نگه می‌دارد ولی بیمه‌ی سهم کارگرِ کسرشدنی از آن کوچک‌تر می‌شود.
+-- برخلاف کلید بیمه، این یکی هیچ داده‌ای (ITEM_DEF/حکم/Run) را بازنویسی نمی‌کند و
+-- فقط هنگام محاسبه خوانده می‌شود؛ پس Procedure یک‌بارمصرف لازم ندارد و مثل بقیه‌ی
+-- تنظیمات حساس (ACCESS_LEVEL=1) از صفحه‌ی تنظیمات ست می‌شود.
+IF NOT EXISTS(SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'TAX_NON_SUBJECT_EFFECTIVE_FROM')
+ INSERT dbo.PAY2_CONFIG(CFG_KEY,CFG_VALUE,CFG_OPTIONS,CFG_DEFAULT,CFG_SECTION,LABEL_FA,DESC_FA,OPT_LABELS,DATA_TYPE,ACCESS_LEVEL)
+ VALUES(N'TAX_NON_SUBJECT_EFFECTIVE_FROM',N'0',NULL,N'0',N'مالیات',N'تاریخ اثر عدم مشمولیت مالیاتِ شیفت و اضافه‌کار',
+        N'تاریخ شمسی روز اول ماه (مثلاً 14050401). صفر یعنی خاموش و رفتار پیش‌فرض برقرار است: شیفت و اضافه‌کار مشمول مالیات‌اند. فعال کردن، مالیات این اقلام را از همان ماه به بعد صفر می‌کند؛ مسئولیت قانونی با کارفرماست.',NULL,N'DATE',1);
+
 IF OBJECT_ID(N'dbo.PAY2_INS_NON_SUBJECT_OPTIN_LOG',N'U') IS NULL
  CREATE TABLE dbo.PAY2_INS_NON_SUBJECT_OPTIN_LOG
  (
@@ -1743,6 +1754,7 @@ BEGIN
         @TAX_YEAR SMALLINT, @TAX_EXEMPT BIGINT,
         @TAX_DEDUCT_INS BIT, @TAX_DEP_APPLY BIT,
         @ADV_ENABLED BIT, @PERIOD_DATE BIGINT, @INS_NON_SUBJECT_EFFECTIVE_FROM BIGINT,
+        @TAX_NON_SUBJECT_EFFECTIVE_FROM BIGINT,
         @PERIOD_MONTH INT, @PERIOD_YEAR INT,
         @MONTHLY_PRORATE BIT;
 
@@ -1812,7 +1824,8 @@ BEGIN
         @TAX_DEP_APPLY     = ISNULL(CAST(MAX(CASE WHEN CFG_KEY='TAX_DEPRIVATION_APPLY' THEN CAST(CFG_VALUE AS INT) END) AS BIT), 0),
         @ADV_ENABLED       = ISNULL(CAST(MAX(CASE WHEN CFG_KEY='ADV_ENABLED'        THEN CAST(CFG_VALUE AS INT) END) AS BIT), 0),
         @MONTHLY_PRORATE   = ISNULL(CAST(MAX(CASE WHEN CFG_KEY='MONTHLY_ITEM_PRORATE' THEN CAST(CFG_VALUE AS INT) END) AS BIT), 0),
-        @INS_NON_SUBJECT_EFFECTIVE_FROM = ISNULL(MAX(CASE WHEN CFG_KEY='INS_NON_SUBJECT_EFFECTIVE_FROM' THEN TRY_CAST(CFG_VALUE AS BIGINT) END),0)
+        @INS_NON_SUBJECT_EFFECTIVE_FROM = ISNULL(MAX(CASE WHEN CFG_KEY='INS_NON_SUBJECT_EFFECTIVE_FROM' THEN TRY_CAST(CFG_VALUE AS BIGINT) END),0),
+        @TAX_NON_SUBJECT_EFFECTIVE_FROM = ISNULL(MAX(CASE WHEN CFG_KEY='TAX_NON_SUBJECT_EFFECTIVE_FROM' THEN TRY_CAST(CFG_VALUE AS BIGINT) END),0)
     FROM PAY2_CONFIG;
 
     SELECT @PERIOD_DATE = PERIOD_DATE
@@ -2176,6 +2189,15 @@ BEGIN
         -- Runهای نهایی نیز طبق کنترل موتور قابل بازمحاسبه نیستند.
         IF @INS_NON_SUBJECT_EFFECTIVE_FROM>0 AND @PERIOD_DATE/100>=@INS_NON_SUBJECT_EFFECTIVE_FROM/100
             UPDATE @ItemCalc SET INS_SUBJECT=0
+            WHERE ITEM_CODE IN('SHIFT','OT_NORMAL','OT_HOLIDAY','OT_ADMIN');
+
+        -- قرینه‌ی مالیاتی، با کلید مستقل. عمداً جدا از کلید بیمه است تا دیتابیسی که
+        -- فقط قاعده‌ی بیمه را روشن کرده رفتار مالیاتی‌اش تغییر نکند.
+        -- ترتیب مهم است: این UPDATE بعد از حل شدن Overrideهای حکم/پرسنل اجرا می‌شود،
+        -- پس TAX_OV=1 روی حکمِ قفل‌شده را هم خنثی می‌کند — همان کاری که نسخه‌ی بیمه
+        -- برای INS_OV می‌کند.
+        IF @TAX_NON_SUBJECT_EFFECTIVE_FROM>0 AND @PERIOD_DATE/100>=@TAX_NON_SUBJECT_EFFECTIVE_FROM/100
+            UPDATE @ItemCalc SET TAX_SUBJECT=0
             WHERE ITEM_CODE IN('SHIFT','OT_NORMAL','OT_HOLIDAY','OT_ADMIN');
 
         -- گام ۷ — محاسبه بیمه

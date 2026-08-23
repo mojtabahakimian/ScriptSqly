@@ -1,0 +1,42 @@
+name: Build
+
+# این مخزن تا امروز هیچ بررسی خودکاری نداشت، در حالی که تمام DDL و
+# Procedureهای PAY2 اینجا به‌صورت رشته‌ی verbatim داخل C# نگه‌داری می‌شوند.
+# یعنی یک اشتباه ساده مثل جا افتادن "" در یک رشته، کل اسکریپت به‌روزرسانی
+# دیتابیس مشتری را خراب می‌کند — و تنها چیزی که پیش از رسیدن به مشتری
+# می‌گیردش، همین کامپایل است.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: کامپایل
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: دریافت کد
+        uses: actions/checkout@v4
+
+      - name: نصب .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: کش NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: بازیابی بسته‌ها
+        run: dotnet restore ScriptSqly.sln
+
+      - name: کامپایل (Release)
+        run: dotnet build ScriptSqly.sln --configuration Release --no-restore

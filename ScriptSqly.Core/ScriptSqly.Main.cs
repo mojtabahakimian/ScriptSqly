@@ -2159,6 +2159,133 @@ END;";
                     try { db.Execute($@"ALTER TABLE dbo.VISITOR_DTL ADD LOG NVARCHAR(4000) NULL"); } catch { }
 
 
+                    //محاسبه/بازسازی پورسانت ویزیتور فاکتور فروش — پشتوانه‌ی پنجره‌ی «کنترل پورسانت فاکتور فروش»
+                    //قاعده عیناً همان چیزی است که CL_HESABDARI_AUTO_BAZ.GENSANADFROOSH موقع صدور سند اجرا می‌کند:
+                    //سطر مبلغ‌ثابت (STAT=1) هرگز فهرست/تغییر نمی‌شود؛ سطر دارای الگو (PORID) از جمع نرخ
+                    //تک‌تک کالاهای دارای نرخ در آن الگو ساخته می‌شود؛ سطر بدون الگو از درصد × مبنای فاکتور.
+                    //CREATE OR ALTER از SQL Server 2016 SP1 به بعد است و روی 2008 R2 خطای نحوی می‌دهد
+                    //این بلوک روی هر لاگینِ هر کاربر اجرا می‌شود؛ مثل بقیه‌ی این فایل باید try/catch باشد
+                    //تا یک خطای احتمالی اینجا کل زنجیره‌ی مهاجرتِ لاگین را نخواباند.
+                    try
+                    {
+                        db.Execute(@"IF OBJECT_ID(N'dbo.RecalcVisitorPorsant_ByDarsad', N'P') IS NOT NULL
+                                         DROP PROCEDURE dbo.RecalcVisitorPorsant_ByDarsad");
+                    }
+                    catch { }
+
+                    try
+                    {
+                        db.Execute(@"CREATE PROCEDURE dbo.RecalcVisitorPorsant_ByDarsad
+    @NUMBER       FLOAT  = NULL,   -- شماره فاکتور؛ NULL یعنی همه فاکتورها
+    @TAG          FLOAT  = 2,      -- نوع سند؛ 2 = فاکتور فروش، NULL یعنی همه
+    @FromDate     BIGINT = NULL,   -- تاریخ شمسی ۸ رقمی، مثلا 14050101
+    @ToDate       BIGINT = NULL,
+    @PREVIEW_ONLY BIT    = 1       -- پیش‌فرض: فقط لیست مغایرت‌ها، بدون هیچ تغییری
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    -- گزینه شماره ۶۲ تنظیمات سازمان: اگر «5» باشد، ارزش افزوده هم جزو مبنای پورسانتِ سطرهای بدون‌الگو است
+    DECLARE @IncludeVat BIT = 0;
+    SELECT TOP (1) @IncludeVat = CASE WHEN SUBSTRING(OPTIONSS, 62, 1) = N'5' THEN 1 ELSE 0 END
+    FROM dbo.SAZMAN
+    WHERE OPTIONSS IS NOT NULL;
+
+    ;WITH BASE AS
+    (
+        -- مبنای فاکتور برای سطرهای بدون‌الگو: SUM(MABL_K) - TAKHFIF [+ MBAA اگر گزینه ۶۲ فعال باشد]
+        SELECT NUMBER, TAG, SUM(ISNULL(MABL_K, 0)) AS SUM_MABL_K
+        FROM dbo.INVO_LST
+        GROUP BY NUMBER, TAG
+    ),
+    PATTERN AS
+    (
+        -- برای هر سطر دارای الگو: جمعِ سهمِ کالاهایی که در همان الگو نرخ دارند؛ کالای بدون نرخ سهمی نمی‌دهد
+        SELECT vd.ID,
+               SUM(ROUND((ISNULL(il.MABL_K, 0) - ISNULL(il.N_MOIN, 0)) * vpk.PORSANT / 100.0, 0)) AS PATTERN_AMOUNT,
+               SUM(ISNULL(il.MABL_K, 0) - ISNULL(il.N_MOIN, 0)) AS PATTERN_MBK
+        FROM dbo.VISITOR_DTL AS vd
+            INNER JOIN dbo.INVO_LST AS il
+                ON il.NUMBER = vd.NUMBER AND il.TAG = vd.TAG
+            INNER JOIN dbo.VISITORS_PORSANT_KALA AS vpk
+                ON vpk.CODE = il.CODE AND vpk.PORID = vd.PORID
+        WHERE vd.PORID IS NOT NULL
+        GROUP BY vd.ID
+    )
+    SELECT vd.ID,
+           vd.NUMBER,
+           vd.TAG,
+           vd.CUST_NO,
+           h.DATE_N,
+           chv.NAME AS CUST_NAME,
+           vd.PORID,
+           CAST(CASE WHEN vd.PORID IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS HAS_PATTERN,
+           vd.DARSAD,
+           ISNULL(vd.PURSANT, 0) AS OLD_PURSANT,
+           CASE
+               WHEN vd.PORID IS NOT NULL THEN ISNULL(p.PATTERN_AMOUNT, 0)
+               ELSE ROUND(ISNULL(vd.DARSAD, 0) / 100.0
+                          * (ISNULL(b.SUM_MABL_K, 0) - ISNULL(h.TAKHFIF, 0)
+                             + CASE WHEN @IncludeVat = 1 THEN ISNULL(h.MBAA, 0) ELSE 0 END), 0)
+           END AS NEW_PURSANT,
+           CASE
+               WHEN vd.PORID IS NOT NULL THEN NULL
+               ELSE ISNULL(b.SUM_MABL_K, 0) - ISNULL(h.TAKHFIF, 0)
+                    + CASE WHEN @IncludeVat = 1 THEN ISNULL(h.MBAA, 0) ELSE 0 END
+           END AS NET_BASE,
+           p.PATTERN_AMOUNT,
+           CASE
+               WHEN vd.PORID IS NOT NULL AND p.PATTERN_MBK IS NULL
+                   THEN N'این ویزیتور برای هیچ‌کدام از کالاهای این فاکتور در این الگو نرخ ندارد'
+               ELSE NULL
+           END AS WARNING
+    INTO #FIX
+    FROM dbo.VISITOR_DTL AS vd
+        INNER JOIN dbo.HEAD_LST AS h
+            ON h.NUMBER = vd.NUMBER AND h.TAG = vd.TAG
+        LEFT JOIN BASE AS b
+            ON b.NUMBER = vd.NUMBER AND b.TAG = vd.TAG
+        LEFT JOIN PATTERN AS p
+            ON p.ID = vd.ID
+        LEFT JOIN dbo.CUST_HESAB AS chv
+            ON chv.hes = vd.CUST_NO
+    WHERE ISNULL(vd.STAT, 0) = 0          -- سطرهای «مبلغ ثابت» هرگز دست نمی‌خورند و فهرست نمی‌شوند
+          AND (@NUMBER IS NULL OR vd.NUMBER = @NUMBER)
+          AND (@TAG IS NULL OR vd.TAG = @TAG)
+          AND (@FromDate IS NULL OR h.DATE_N >= @FromDate)
+          AND (@ToDate IS NULL OR h.DATE_N <= @ToDate);
+
+    -- فقط مغایرت‌های واقعی؛ اختلاف زیر یک ریال ناشی از تفاوت گِردکردن است
+    DELETE FROM #FIX
+    WHERE ABS(OLD_PURSANT - NEW_PURSANT) < 0.5;
+
+    IF @PREVIEW_ONLY = 1
+    BEGIN
+        SELECT * FROM #FIX ORDER BY DATE_N, NUMBER;
+        DROP TABLE #FIX;
+        RETURN;
+    END;
+
+    BEGIN TRANSACTION;
+
+    UPDATE vd
+    SET vd.PURSANT = f.NEW_PURSANT
+    FROM dbo.VISITOR_DTL AS vd
+        INNER JOIN #FIX AS f
+            ON f.ID = vd.ID;
+
+    COMMIT TRANSACTION;
+
+    -- شماره فاکتورهایی که واقعاً تغییر کردند؛ سمتِ C# باید سند حسابداری همین فاکتورها را دوباره صادر کند
+    SELECT DISTINCT NUMBER, TAG FROM #FIX;
+
+    DROP TABLE #FIX;
+END");
+                    }
+                    catch { }
+
+
                     try { db.Execute($@"CREATE FUNCTION dbo.Getusersemat
 									(
 									    @usid INT,

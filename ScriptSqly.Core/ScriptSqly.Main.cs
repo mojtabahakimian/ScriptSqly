@@ -3808,7 +3808,7 @@ RETURN (
     ),
     -- مرتب‌سازی مطابق کارت انبار: DATE_N، BARGAH (از TAGCOD)، NUMBER
     lastav_base AS (
-        SELECT i.CODE, i.ANBAR, i.AVRAGE AS AVRAGE, h.DATE_N, t.BARGAH, i.NUMBER
+        SELECT i.CODE, i.ANBAR, i.AVRAGE AS AVRAGE, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
         FROM dbo.INVO_LST i
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
@@ -3817,15 +3817,25 @@ RETURN (
         UNION ALL
 
         -- وارده از انتقال (ANBARF = انبار مقصد)
-        SELECT i.CODE, i.ANBARF, i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER
+        SELECT i.CODE, i.ANBARF, i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
         FROM dbo.INVO_LST i
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG = 5
     ),
+    -- وقتی یک سند یک کالا را در چند ردیف با نرخ‌های متفاوت ثبت کرده
+    -- (مثلاً دو محموله‌ی هم‌روز با نرخ فرق)، ردیف‌ها در
+    -- (DATE_N,BARGAH,NUMBER) کاملاً هم‌تراز می‌شوند و بدون تای‌برک نهایی،
+    -- ROW_NUMBER بین اجراهای مختلف می‌تواند هرکدام را انتخاب کند —
+    -- نتیجه‌ی MABLK بدون هیچ تغییری در داده، بین دو اجرای پشت‌سرهم عوض
+    -- می‌شد. id DESC (آخرین ردیفی که نوشته شده) درست است: نرخِ روی id
+    -- بزرگ‌تر همان نرخی است که اسناد *بعدی* (AVRAGE2شان) واقعاً استفاده
+    -- کرده‌اند — یعنی موتور نرخ میانگین بعد از پردازش هر دو ردیف همین
+    -- سند، روی همین عدد نهایی نشسته. تأیید شد: با این تای‌برک، MABLK
+    -- کد ۳۰۹۲/انبار۳ دقیقاً با مانده‌ی حسابداری برابر شد (تا ریال).
     lastav AS (
         SELECT CODE, ANBAR, AVRAGE,
-               ROW_NUMBER() OVER (PARTITION BY CODE, ANBAR ORDER BY DATE_N DESC, BARGAH DESC, NUMBER DESC) AS rn
+               ROW_NUMBER() OVER (PARTITION BY CODE, ANBAR ORDER BY DATE_N DESC, BARGAH DESC, NUMBER DESC, ID DESC) AS rn
         FROM lastav_base
     ),
     kart_anbar AS (

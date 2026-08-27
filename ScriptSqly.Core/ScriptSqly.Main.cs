@@ -1848,6 +1848,8 @@ BEGIN
 	DECLARE @WarningMessage NVARCHAR(500);
 	DECLARE @IdentificationMethod NVARCHAR(100);
 	DECLARE @HovalehNumber FLOAT = @NUMBER; -- شماره حواله مبنا برای محاسبات
+	DECLARE @CustomerID NVARCHAR(40);       -- حساب مشتریِ همین برگه
+	DECLARE @AutoDetected BIT = 0;          -- ویزیتور توسط خودِ رویه شناسایی شد یا از بیرون داده شد
 	-- طول امن ستون‌ها (به واحد کاراکتر؛ NVARCHAR یعنی /2)
 	DECLARE @TOZIH_MAX INT = CASE WHEN COL_LENGTH('dbo.VISITOR_DTL','TOZIH') IS NULL THEN NULL ELSE COL_LENGTH('dbo.VISITOR_DTL','TOZIH')/2 END;
 	DECLARE @LOG_MAX   INT = CASE WHEN COL_LENGTH('dbo.VISITOR_DTL','LOG')   IS NULL THEN NULL ELSE COL_LENGTH('dbo.VISITOR_DTL','LOG')  /2 END;
@@ -1863,6 +1865,44 @@ BEGIN
 	BEGIN
 		-- === بخش شناسایی خودکار (اگر ویزیتور ورودی خالی باشد) ===
 		PRINT N'پیام: حساب ویزیتور ارائه نشده است. شروع فرآیند شناسایی خودکار...';
+		SET @AutoDetected = 1;
+
+		-- حساب مشتریِ همین برگه؛ مبنای روش‌های مبتنی بر مشتری
+		SELECT @CustomerID = CUST_NO
+		FROM dbo.HEAD_LST
+		WHERE NUMBER = @NUMBER
+			  AND TAG = @TAG;
+
+		-- روش ۱ (اولویت اول): ویزیتورِ «مسیر ویزیتِ» خودِ مشتری
+		-- پورسانت به ویزیتوری تعلق دارد که مشتری در مسیر ویزیت او تعریف شده است، نه به کاربری
+		-- که برگه را ثبت کرده؛ چون یک کاربر می‌تواند به جای ویزیتور دیگری پیش‌فاکتور/فاکتور بزند.
+		IF @CustomerID IS NOT NULL AND @CustomerID <> ''
+		BEGIN
+			-- الف) مسیر ویزیتِ ثبت‌شده روی خودِ حساب مشتری
+			SELECT TOP (1) @VisitorID = vr.HES
+			FROM dbo.CUST_HESAB c
+				JOIN dbo.Visit_route vr
+					ON vr.ROUTE_NAME = c.ROUTE_NAME
+			WHERE c.hes = @CustomerID
+				  AND ISNULL(vr.HES, N'') <> N''
+			ORDER BY CASE WHEN ISNULL(vr.RACTIVE, 0) = 1 THEN 0 ELSE 1 END;
+
+			-- ب) اگر روی حساب مشتری مسیری ثبت نشده بود، از عضویتِ مشتری در مسیرها
+			IF @VisitorID IS NULL OR @VisitorID = ''
+				SELECT TOP (1) @VisitorID = vr.HES
+				FROM dbo.Visit_route_dtl d
+					JOIN dbo.Visit_route vr
+						ON vr.ROUTE_NAME = d.ROUTE_NAME
+				WHERE d.COUST_NO = @CustomerID
+					  AND ISNULL(vr.HES, N'') <> N''
+				ORDER BY CASE WHEN ISNULL(d.RACTIVE, 0) = 1 THEN 0 ELSE 1 END,
+						 CASE WHEN ISNULL(vr.RACTIVE, 0) = 1 THEN 0 ELSE 1 END,
+						 d.IDR DESC;
+
+			IF @VisitorID IS NOT NULL
+			   AND @VisitorID <> ''
+				SET @IdentificationMethod = N'روش 1: ویزیتور مسیر ویزیت مشتری';
+		END;
 
 		-- روش ۲: از طریق UID در HEAD_LST
 		IF @VisitorID IS NULL OR @VisitorID = ''
@@ -1875,13 +1915,13 @@ BEGIN
 				  AND h.TAG = @TAG;
 			IF @VisitorID IS NOT NULL
 			   AND @VisitorID <> ''
-				SET @IdentificationMethod = N'روش 1: شناسایی از طریق شناسه کاربر (UID)';
+				SET @IdentificationMethod = N'روش 2: شناسایی از طریق شناسه کاربر (UID)';
 		END;
 
 		IF @VisitorID IS NULL
 		   OR @VisitorID = ''
 		BEGIN
-			-- روش ۱: از طریق USER_NAME در HEAD_LST
+			-- روش ۳: از طریق USER_NAME در HEAD_LST
 			SELECT @VisitorID = s.HES
 			FROM dbo.HEAD_LST h
 				JOIN dbo.SALA_DTL s
@@ -1890,17 +1930,12 @@ BEGIN
 				  AND h.TAG = @TAG;
 			IF @VisitorID IS NOT NULL
 			   AND @VisitorID <> ''
-				SET @IdentificationMethod = N'روش 2: شناسایی از طریق نام کاربر در سربرگ';
+				SET @IdentificationMethod = N'روش 3: شناسایی از طریق نام کاربر در سربرگ';
 		END;
 
-		-- روش ۳: یافتن آخرین ویزیتور مشتری
+		-- روش ۴: یافتن آخرین ویزیتور مشتری
 		IF @VisitorID IS NULL OR @VisitorID = ''
 		BEGIN
-			DECLARE @CustomerID NVARCHAR(40);
-			SELECT @CustomerID = CUST_NO
-			FROM dbo.HEAD_LST
-			WHERE NUMBER = @NUMBER
-				  AND TAG = @TAG;
 			IF @CustomerID IS NOT NULL
 			BEGIN
 				SELECT TOP 1
@@ -1912,17 +1947,17 @@ BEGIN
 				ORDER BY vd.ID DESC;
 				IF @VisitorID IS NOT NULL
 				   AND @VisitorID <> ''
-					SET @IdentificationMethod = N'روش ۳: شناسایی بر اساس آخرین ویزیتور مشتری';
+					SET @IdentificationMethod = N'روش 4: شناسایی بر اساس آخرین ویزیتور مشتری';
 			END;
 		END;
 
-		-- روش ۴: ردیابی از طریق اتوماسیون (TASKS و EVENTS)
+		-- روش ۵: ردیابی از طریق اتوماسیون (TASKS و EVENTS)
 		IF @VisitorID IS NULL OR @VisitorID = ''
 		BEGIN
 			IF @TAG IN ( 2, 13 )
 			BEGIN
 				-- --- منطق مخصوص فرآیند فروش (حواله و فاکتور) ---
-				SET @IdentificationMethod = N'روش 4 (اتوماسیون فروش): شناسایی مالک پیش‌فاکتور اصلی';
+				SET @IdentificationMethod = N'روش 5 (اتوماسیون فروش): شناسایی مالک پیش‌فاکتور اصلی';
 
 				DECLARE @TaskID_Sale INT,
 						@TaskOwner_Sale NVARCHAR(50);
@@ -1945,7 +1980,7 @@ BEGIN
 			ELSE
 			BEGIN
 				-- --- منطق عمومی برای سایر انواع اسناد ---
-				SET @IdentificationMethod = N'روش 4 (اتوماسیون عمومی): شناسایی مالک وظیفه اصلی';
+				SET @IdentificationMethod = N'روش 5 (اتوماسیون عمومی): شناسایی مالک وظیفه اصلی';
 
 				DECLARE @TaskID_General INT, @TaskOwner_General NVARCHAR(50);
 				SELECT TOP 1
@@ -2001,6 +2036,28 @@ BEGIN
 		PRINT N'خطا: ویزیتور مالک این فاکتور شناسایی نشد. محاسبه متوقف شد.';
 		RETURN;
 	END;
+
+	-- سطرهای صفرِ به‌جامانده از شناسایی قبلی (معمولاً به نامِ کاربرِ ثبت‌کننده) با شناسایی
+	-- تازه بی‌اعتبار می‌شوند و باید برداشته شوند تا زیر یک فاکتور دو ویزیتور ثبت نشود.
+	-- فقط سطری حذف می‌شود که خودِ همین رویه ساخته باشد (TOZIH برچسبِ روشِ شناسایی و LOG پرشده)،
+	-- هیچ درصد/مبلغی نگرفته باشد و «مبلغ ثابت» نخورده باشد؛ سطرهای دستیِ کاربر دست‌نخورده می‌مانند.
+	IF @AutoDetected = 1
+		DELETE FROM dbo.VISITOR_DTL
+		WHERE NUMBER = @NUMBER
+			  AND TAG = @TAG
+			  AND CUST_NO <> @VisitorID
+			  AND ISNULL(STAT, 0) = 0
+			  AND ISNULL(PURSANT, 0) = 0
+			  AND ISNULL(DARSAD, 0) = 0
+			  AND [LOG] IS NOT NULL
+			  AND TOZIH LIKE N'روش%';
+
+	-- روشِ شناسایی در ستون توضیحِ سطر ثبت می‌شود تا معلوم باشد این سطر را چه چیزی ساخته است.
+	-- این مقدار تا امروز در زمان DECLARE و پیش از شناسایی ساخته می‌شد و همیشه خالی می‌ماند.
+	SET @TOZIH_SAFE = CASE
+						  WHEN @TOZIH_MAX IS NULL THEN ISNULL(@IdentificationMethod, N'')
+						  ELSE LEFT(ISNULL(@IdentificationMethod, N''), @TOZIH_MAX)
+					  END;
 
 	-- ========== ۳. یافتن الگوی پورسانت ==========
 	SELECT TOP (1) @PORID = PORID FROM dbo.SALA_DTL
@@ -4009,6 +4066,90 @@ BEGIN
 END
 "); } catch { }
                 }
+
+                //پورسانت ویزیتور به تفکیک انبارِ ارسال بار
+                //هزینه‌ی پورسانتِ باری که از دفتر یزد رفته باید از بارِ کارخانه جدا شود؛ ملاکِ دقیق،
+                //انبارِ خودِ سطرهای فاکتور است نه واحدِ کاربرِ ثبت‌کننده (DEPATMAN). اگر یک فاکتور از
+                //چند انبار بار شده باشد، پورسانتِ فاکتور به نسبتِ مبلغ خالصِ سطرهای هر انبار تسهیم می‌شود.
+                //مبنای مبلغ عیناً همان چیزی است که dbo.CalculateVisitorPorsant استفاده می‌کند:
+                //MABL_K - N_MOIN روی سطرهای غیرجایزه (JAY = 0).
+                try { db.Execute(@"IF OBJECT_ID(N'dbo.VISITOR_PORSANT_ANBAR', N'V') IS NOT NULL
+                                       DROP VIEW dbo.VISITOR_PORSANT_ANBAR"); } catch { }
+                try
+                {
+                    db.Execute(@"CREATE VIEW dbo.VISITOR_PORSANT_ANBAR
+AS
+SELECT
+    vd.ID                        AS PORSANT_ID,
+    vd.NUMBER,
+    vd.TAG,
+    vd.CUST_NO,
+    sh.ANBAR,
+    ISNULL(ta.NAMES, N'نامشخص')  AS ANBAR_NAME,
+    sh.MABL_ANBAR,
+    tot.MABL_KOL,
+    tot.ANBAR_COUNT,
+    CASE WHEN ISNULL(tot.MABL_KOL, 0) = 0 THEN 0
+         ELSE sh.MABL_ANBAR / tot.MABL_KOL
+    END                          AS RATIO,
+    CASE WHEN ISNULL(tot.MABL_KOL, 0) = 0 THEN 0
+         ELSE ROUND(ISNULL(vd.PURSANT, 0) * sh.MABL_ANBAR / tot.MABL_KOL, 0)
+    END                          AS PURSANT_ANBAR
+FROM dbo.VISITOR_DTL vd
+    INNER JOIN
+    (
+        SELECT il.NUMBER, il.TAG, ISNULL(il.ANBAR, -1) AS ANBAR,
+               SUM(il.MABL_K - ISNULL(il.N_MOIN, 0)) AS MABL_ANBAR
+        FROM dbo.INVO_LST il
+        WHERE ISNULL(il.JAY, 0) = 0
+        GROUP BY il.NUMBER, il.TAG, ISNULL(il.ANBAR, -1)
+    ) sh
+        ON sh.NUMBER = vd.NUMBER AND sh.TAG = vd.TAG
+    INNER JOIN
+    (
+        SELECT il.NUMBER, il.TAG,
+               SUM(il.MABL_K - ISNULL(il.N_MOIN, 0)) AS MABL_KOL,
+               COUNT(DISTINCT ISNULL(il.ANBAR, -1)) AS ANBAR_COUNT
+        FROM dbo.INVO_LST il
+        WHERE ISNULL(il.JAY, 0) = 0
+        GROUP BY il.NUMBER, il.TAG
+    ) tot
+        ON tot.NUMBER = vd.NUMBER AND tot.TAG = vd.TAG
+    LEFT OUTER JOIN dbo.TCOD_ANBAR ta
+        ON ta.CODE = sh.ANBAR"); } catch { }
+
+                //پورسانتِ پشتِ هر فاکتور برای پنجره‌ی جستجو در گردش کالا (F12)
+                //KALAS سطرِ کالاست؛ پورسانت سطحِ فاکتور است، پس برای هر سطر همان پورسانتِ فاکتورش
+                //تکرار می‌شود. اگر فاکتور بیش از یک ویزیتور داشته باشد، مبالغ جمع و نام‌ها کنار هم می‌آیند.
+                try { db.Execute(@"IF OBJECT_ID(N'dbo.KALAS_PORSANT', N'V') IS NOT NULL
+                                       DROP VIEW dbo.KALAS_PORSANT"); } catch { }
+                try
+                {
+                    db.Execute(@"CREATE VIEW dbo.KALAS_PORSANT
+AS
+SELECT k.*,
+       v.PRS_VISITOR,
+       CASE WHEN v.PRS_VISITOR_COUNT > 1
+            THEN ISNULL(ch.NAME, v.PRS_VISITOR) + N' (+' + CAST(v.PRS_VISITOR_COUNT - 1 AS NVARCHAR(10)) + N')'
+            ELSE ISNULL(ch.NAME, v.PRS_VISITOR)
+       END AS PRS_VISITOR_NAME,
+       v.PRS_DARSAD,
+       v.PRS_PURSANT
+FROM dbo.KALAS k
+    LEFT OUTER JOIN
+    (
+        SELECT vd.NUMBER,
+               vd.TAG,
+               SUM(ISNULL(vd.PURSANT, 0)) AS PRS_PURSANT,
+               SUM(ISNULL(vd.DARSAD, 0))  AS PRS_DARSAD,
+               MIN(vd.CUST_NO)            AS PRS_VISITOR,
+               COUNT(*)                   AS PRS_VISITOR_COUNT
+        FROM dbo.VISITOR_DTL vd
+        GROUP BY vd.NUMBER, vd.TAG
+    ) v
+        ON v.NUMBER = k.NUMBER AND v.TAG = k.TAG
+    LEFT OUTER JOIN dbo.CUST_HESAB ch
+        ON ch.hes = v.PRS_VISITOR"); } catch { }
 
                 if (isCustomCall) //1405/04/12
                 {

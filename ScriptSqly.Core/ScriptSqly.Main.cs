@@ -40,6 +40,7 @@ namespace ScriptSqly.Migrations
 
                 if (isCustomCall)
                 {
+                    try { db.Execute("ALTER TABLE dbo.OTHER_DTL ALTER COLUMN TOZIH NVARCHAR(1000) NULL"); } catch { } //اضافه کردن توضیحات بیشتر به Ctrl + G سایر اطلاعا حواله انبار فروش
 
                     //نوع ارز سطرهای خزانه و سند ; در هر اجرا بررسی میشود چون فرم خزانه بدون این ستون کار نمیکند
                     foreach (var ARZKIND2_TABLE in new[] { "PGET_LST", "TR_PGET_LST", "DEED_DTL" })

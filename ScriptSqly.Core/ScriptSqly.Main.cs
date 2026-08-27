@@ -2193,8 +2193,11 @@ BEGIN
 
 		IF @ConflictCust IS NOT NULL
 		BEGIN
-			DECLARE @ExistingPursant FLOAT = (SELECT PURSANT FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
-			DECLARE @ExistingDarsad  FLOAT = (SELECT DARSAD  FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+			-- TOP (1) عمداً اضافه شد: اگر به‌خاطر داده‌ی قدیمیِ ناهنجار (پیش از این تغییرات) بیش از یک
+			-- سطر برای همین (NUMBER,TAG,CUST_NO) وجود داشته باشد، ساب‌کوئریِ اسکالر بدونِ TOP (1)
+			-- با خطای Subquery returned more than 1 value کلِ اجرای رویه را متوقف می‌کرد.
+			DECLARE @ExistingPursant FLOAT = (SELECT TOP (1) PURSANT FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+			DECLARE @ExistingDarsad  FLOAT = (SELECT TOP (1) DARSAD  FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
 
 			IF ISNULL(@ExistingPursant, 0) <> 0 OR ISNULL(@ExistingDarsad, 0) <> 0
 			BEGIN

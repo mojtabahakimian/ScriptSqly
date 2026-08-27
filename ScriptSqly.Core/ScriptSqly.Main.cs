@@ -1759,7 +1759,19 @@ VALUES
 									PRIMARY KEY (USER_ID, PERSONEL_ID))"); } catch { }
 
                     //بررسی مالکیت فاکتور و محاسبه پورسانت به صورت هوشمند
+                    //این بخش عمداً فقط با اجرای دستیِ اسکریپت (isCustomCall = true) فعال می‌شود، نه با
+                    //لاگینِ عادی؛ به‌خواستِ صریحِ کاربر، چون تغییرِ ساختاریِ محاسبه‌ی پورسانت باید با اراده‌ی
+                    //آگاهانه‌ی خودِ کاربر اجرا شود، نه خودکار و بی‌اطلاع در پسِ‌زمینه‌ی هر ورودِ ساده به برنامه.
                     {
+                        //ستون لاگِ سطر پورسانت باید پیش از CREATE PROCEDURE پایین وجود داشته باشد؛ آن رویه
+                        //مستقیماً "SET LOG = ..." می‌نویسد، و ارجاعِ مستقیم به ستونِ ناموجود باعثِ شکستِ فوریِ
+                        //CREATE PROCEDURE می‌شود (برخلافِ COL_LENGTH که رشته می‌گیرد و دیرهنگام حل می‌شود).
+                        //تستِ روی دیتابیسِ کاملاً تازه نشان داد: اگر این خط بعد از این بلوک بماند (جای اصلیِ
+                        //قبلی‌اش، پایین‌ترِ همین متد)، اولین اجرای دستیِ اسکریپت رویه را نمی‌سازد و کاربر باید
+                        //دوباره دستی اجرا کند تا خودش را ترمیم کند؛ اینجا از همان اولین بار درست کار می‌کند.
+                        try { db.Execute(@"IF COL_LENGTH('dbo.VISITOR_DTL','LOG') IS NULL
+                                               ALTER TABLE dbo.VISITOR_DTL ADD [LOG] NVARCHAR(4000) NULL"); } catch { }
+
                         string sqlscript = @"
 CREATE FUNCTION dbo.Fixp
 (
@@ -2040,8 +2052,10 @@ BEGIN
 
 	-- سطرهای صفرِ به‌جامانده از شناسایی قبلی (معمولاً به نامِ کاربرِ ثبت‌کننده) با شناسایی
 	-- تازه بی‌اعتبار می‌شوند و باید برداشته شوند تا زیر یک فاکتور دو ویزیتور ثبت نشود.
-	-- فقط سطری حذف می‌شود که خودِ همین رویه ساخته باشد (TOZIH برچسبِ روشِ شناسایی و LOG پرشده)،
+	-- فقط سطری حذف می‌شود که برچسبِ روشِ شناسایی خودِ همین رویه را در TOZIH داشته باشد،
 	-- هیچ درصد/مبلغی نگرفته باشد و «مبلغ ثابت» نخورده باشد؛ سطرهای دستیِ کاربر دست‌نخورده می‌مانند.
+	-- شرطِ پرشدنِ LOG برداشته شد چون سطرهای قدیمی‌ترِ خودِ رویه (پیش از افزوده‌شدن ستون LOG)
+	-- لاگ ندارند و با آن شرط برای همیشه زیر فاکتور باقی می‌ماندند.
 	IF @AutoDetected = 1
 		DELETE FROM dbo.VISITOR_DTL
 		WHERE NUMBER = @NUMBER
@@ -2050,7 +2064,6 @@ BEGIN
 			  AND ISNULL(STAT, 0) = 0
 			  AND ISNULL(PURSANT, 0) = 0
 			  AND ISNULL(DARSAD, 0) = 0
-			  AND [LOG] IS NOT NULL
 			  AND TOZIH LIKE N'روش%';
 
 	-- روشِ شناسایی در ستون توضیحِ سطر ثبت می‌شود تا معلوم باشد این سطر را چه چیزی ساخته است.
@@ -2157,7 +2170,67 @@ BEGIN
 	END;
 	ELSE
 	BEGIN
-		-- اگر مبلغ ثابت نبود، عملیات به‌روزرسانی یا درج را انجام می‌دهیم
+		-- ========== ۷.۱ محافظ برابرِ دوبل‌شدنِ پورسانت ==========
+		-- اگر سطرِ خودِ همین ویزیتور روی این فاکتور هنوز نیست (یعنی الان قرار است یک سطرِ *تازه*
+		-- اضافه شود، نه بازمحاسبه‌ی سطرِ موجودش) ولی برای شخصِ دیگری از قبل پورسانتِ واقعی
+		-- (مبلغ یا درصدِ غیرصفر) ثبت شده — چه دستیِ کاربر باشد چه محاسبه‌ی قبلی — افزودنِ خودکارِ
+		-- یک نفرِ دیگر یعنی این فاکتور به‌جای یک نفر به دو نفر پورسانت می‌دهد، بدون این‌که کسی متوجه
+		-- شود. سناریوی واقعی: فاکتورِ دو ماه پیش که همان لحظه دوباره ذخیره می‌شود.
+		-- به‌جای درجِ خاموشِ مبلغ، سطر با مبلغِ صفر و پیامِ هشدار (که همین حالا در ستونِ توضیح/لاگِ
+		-- فرم دیده می‌شود) درج/به‌روز می‌شود؛ خودِ ویزیتورِ درست معلوم می‌ماند ولی تصمیمِ نهایی
+		-- (آیا واقعاً باید هر دو نفر پورسانت بگیرند؟) با کاربر است، نه با این رویه.
+		-- این چک باید در *هر* اجرا انجام شود، نه فقط وقتیِ سطرِ ویزیتور هنوز وجود ندارد؛
+		-- وگرنه ذخیره‌ی دوم همان فاکتور (سطرِ صفرِ هشدار از دفعه‌ی قبل موجود است) از این محافظ رد
+		-- می‌شد و مسیرِ معمولیِ پایین، صفر را با مبلغِ واقعی جایگزین می‌کرد — یعنی دقیقاً همان
+		-- دوبل‌شدنِ خاموش که قرار بود جلویش گرفته شود، فقط با یک ذخیره‌ی اضافه.
+		DECLARE @ConflictCust NVARCHAR(40);
+		SELECT TOP (1) @ConflictCust = CUST_NO
+		FROM dbo.VISITOR_DTL
+		WHERE NUMBER = @NUMBER
+			  AND TAG = @TAG
+			  AND CUST_NO <> @VisitorID
+			  AND (ISNULL(PURSANT, 0) <> 0 OR ISNULL(DARSAD, 0) <> 0);
+
+		IF @ConflictCust IS NOT NULL
+		BEGIN
+			-- TOP (1) عمداً اضافه شد: اگر به‌خاطر داده‌ی قدیمیِ ناهنجار (پیش از این تغییرات) بیش از یک
+			-- سطر برای همین (NUMBER,TAG,CUST_NO) وجود داشته باشد، ساب‌کوئریِ اسکالر بدونِ TOP (1)
+			-- با خطای Subquery returned more than 1 value کلِ اجرای رویه را متوقف می‌کرد.
+			DECLARE @ExistingPursant FLOAT = (SELECT TOP (1) PURSANT FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+			DECLARE @ExistingDarsad  FLOAT = (SELECT TOP (1) DARSAD  FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+
+			IF ISNULL(@ExistingPursant, 0) <> 0 OR ISNULL(@ExistingDarsad, 0) <> 0
+			BEGIN
+				-- کاربر خودش قبلاً روی همین سطر دستی مبلغ/درصد وارد کرده — یعنی هشدارِ قبلی را دیده
+				-- و آگاهانه پذیرفته که هر دو نفر پورسانت بگیرند. دست‌نخورده می‌ماند؛ محاسبه‌ی خودکار
+				-- روی آن سوار نمی‌شود، فقط پیام برای شفافیت به‌روز می‌شود.
+				PRINT N'توجه: پورسانتِ دستیِ ' + @VisitorID + N' کنارِ پورسانتِ ' + @ConflictCust + N' نگه داشته شد و بازمحاسبه نشد.';
+				UPDATE dbo.VISITOR_DTL
+				SET LOG = N'توجه: این مبلغ/درصد کنارِ پورسانتِ ' + @ConflictCust + N' نگه داشته شده و خودکار بازمحاسبه نمی‌شود؛ اگر اشتباه است دستی اصلاح کنید.'
+				WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID;
+			END
+			ELSE
+			BEGIN
+				DECLARE @ConflictMsg NVARCHAR(500) = N'هشدار: پورسانتِ واقعی برای شخصِ دیگری (' + @ConflictCust
+					+ N') قبلاً روی این فاکتور ثبت شده است. ویزیتورِ مسیرِ این مشتری (' + @VisitorID
+					+ N') شناسایی شد، ولی برای جلوگیری از دوبل‌شدنِ ناخواسته‌ی پورسانت، مبلغش صفر ماند. '
+					+ N'اگر واقعاً هر دو نفر باید پورسانت بگیرند، مبلغ/درصدِ این سطر را دستی وارد کنید.';
+
+				PRINT @ConflictMsg;
+
+				UPDATE dbo.VISITOR_DTL
+				SET LOG = @ConflictMsg, TOZIH = @TOZIH_SAFE
+				WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID;
+
+				IF @@ROWCOUNT = 0
+					INSERT INTO dbo.VISITOR_DTL (NUMBER, TAG, CUST_NO, DARSAD, PURSANT, PORID, STAT, TOZIH, LOG)
+					VALUES (@NUMBER, @TAG, @VisitorID, 0, 0, NULL, 0, @TOZIH_SAFE, @ConflictMsg);
+			END;
+
+			RETURN;
+		END;
+
+		-- اگر مبلغ ثابت نبود و تعارضی هم نبود، عملیات به‌روزرسانی یا درج را انجام می‌دهیم
 		UPDATE dbo.VISITOR_DTL
 		SET PURSANT = ROUND(@TotalPorsant, 0),
 			DARSAD = @Darsad,
@@ -2194,9 +2267,15 @@ BEGIN
 		PRINT N'پورسانت کل (Porsant): ' + CAST(ROUND(ISNULL(@TotalPorsant, 0), 0) AS VARCHAR);
 		PRINT N'درصد نهایی (Darsad): ' + CAST(ISNULL(@Darsad, 0) AS VARCHAR);
 	END;
-
-END;";
-                        var commands = sqlscript.Split(new string[] { "GO\r\n", "GO ", "GO\t" }, StringSplitOptions.RemoveEmptyEntries);
+END;
+";
+                        //تقسیم روی خطِ مستقلِ GO. الگوی قبلی فقط با پایان‌خطِ ویندوزی (CRLF) کار می‌کرد و روی
+                        //چک‌اوتِ LF کلِ اسکریپت یک Batch می‌شد و چون CREATE FUNCTION باید اولین دستور
+                        //Batch باشد، بی‌صدا (داخل catch) شکست می‌خورد و توابع اصلاً ساخته نمی‌شدند.
+                        var commands = System.Text.RegularExpressions.Regex.Split(
+                            sqlscript, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$",
+                            System.Text.RegularExpressions.RegexOptions.Multiline |
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         foreach (var cmdText in commands)
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
@@ -2205,6 +2284,8 @@ END;";
                             }
                         }
                     }
+
+
 
                     //Super Fast Index for Automation MAIN
                     try { db.Execute($@"CREATE NONCLUSTERED INDEX IX_TASKS_Status1

@@ -2441,14 +2441,25 @@ BEGIN
                    WHERE  CAST(hm.CODE AS BIGINT) = c.Code AND hm.GHEYMAT = @Month
                    ORDER BY hm.DATE_ACTIV DESC, hm.FNUMB DESC) f;
 
-    /* ─── ۴) نرخ مواد خريدني: ميانگين وزني خروج از انبار ─── */
+    /* ─── ۴) نرخ مواد خريدني: ميانگين وزني خروج از انبار ───
+       ميرايي (damping): کالاي چندسطحيِ خودمصرف (هم فرمول دارد هم اين
+       ماه ماده‌ي اوليه‌ي جاي ديگري مي‌شود) بدون اين، هر دورِ S07A/S11
+       رويِ دورِ قبل تقويت مي‌شود و واگرا مي‌شود — نسخه‌ي هم‌ارزِ همين
+       فيکس در Server/Database/15-rate-engine-production.sql (پروژه‌ي
+       اصلي Safir) با شرح کامل و تستِ عمليِ همگرايي مستند شده. */
+    DECLARE @Damping FLOAT = 0.35;
+
     UPDATE  c
-       SET  c.Mat = z.fi, c.Src = 1
+       SET  c.Mat = CASE WHEN prev.MaterialCost IS NULL THEN z.fi
+                          ELSE prev.MaterialCost + @Damping * (z.fi - prev.MaterialCost) END,
+            c.Src = 1
     FROM    #C c
     JOIN   (SELECT k.code, SUM(k.MABL_K) / NULLIF(SUM(k.MEGHk), 0) AS fi
             FROM   dbo.KALAS k
             WHERE  k.TAG = 10 AND k.MM = @Month AND k.MEGHk <> 0
             GROUP BY k.code) z ON z.code = c.Code
+    LEFT    JOIN dbo.CC_ItemCost prev
+            ON  prev.RunId = @RunId AND prev.Code = c.Code
     WHERE   c.FNUMB IS NULL AND z.fi IS NOT NULL;
 
     ---- بدون گردش در ماه: آخرين نرخ ميانگين ثبت‌شده

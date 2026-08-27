@@ -4039,7 +4039,64 @@ BEGIN
 	END;
 	ELSE
 	BEGIN
-		-- اگر مبلغ ثابت نبود، عملیات به‌روزرسانی یا درج را انجام می‌دهیم
+		-- ========== ۷.۱ محافظ برابرِ دوبل‌شدنِ پورسانت ==========
+		-- اگر سطرِ خودِ همین ویزیتور روی این فاکتور هنوز نیست (یعنی الان قرار است یک سطرِ *تازه*
+		-- اضافه شود، نه بازمحاسبه‌ی سطرِ موجودش) ولی برای شخصِ دیگری از قبل پورسانتِ واقعی
+		-- (مبلغ یا درصدِ غیرصفر) ثبت شده — چه دستیِ کاربر باشد چه محاسبه‌ی قبلی — افزودنِ خودکارِ
+		-- یک نفرِ دیگر یعنی این فاکتور به‌جای یک نفر به دو نفر پورسانت می‌دهد، بدون این‌که کسی متوجه
+		-- شود. سناریوی واقعی: فاکتورِ دو ماه پیش که همان لحظه دوباره ذخیره می‌شود.
+		-- به‌جای درجِ خاموشِ مبلغ، سطر با مبلغِ صفر و پیامِ هشدار (که همین حالا در ستونِ توضیح/لاگِ
+		-- فرم دیده می‌شود) درج/به‌روز می‌شود؛ خودِ ویزیتورِ درست معلوم می‌ماند ولی تصمیمِ نهایی
+		-- (آیا واقعاً باید هر دو نفر پورسانت بگیرند؟) با کاربر است، نه با این رویه.
+		-- این چک باید در *هر* اجرا انجام شود، نه فقط وقتیِ سطرِ ویزیتور هنوز وجود ندارد؛
+		-- وگرنه ذخیره‌ی دوم همان فاکتور (سطرِ صفرِ هشدار از دفعه‌ی قبل موجود است) از این محافظ رد
+		-- می‌شد و مسیرِ معمولیِ پایین، صفر را با مبلغِ واقعی جایگزین می‌کرد — یعنی دقیقاً همان
+		-- دوبل‌شدنِ خاموش که قرار بود جلویش گرفته شود، فقط با یک ذخیره‌ی اضافه.
+		DECLARE @ConflictCust NVARCHAR(40);
+		SELECT TOP (1) @ConflictCust = CUST_NO
+		FROM dbo.VISITOR_DTL
+		WHERE NUMBER = @NUMBER
+			  AND TAG = @TAG
+			  AND CUST_NO <> @VisitorID
+			  AND (ISNULL(PURSANT, 0) <> 0 OR ISNULL(DARSAD, 0) <> 0);
+
+		IF @ConflictCust IS NOT NULL
+		BEGIN
+			DECLARE @ExistingPursant FLOAT = (SELECT PURSANT FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+			DECLARE @ExistingDarsad  FLOAT = (SELECT DARSAD  FROM dbo.VISITOR_DTL WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID);
+
+			IF ISNULL(@ExistingPursant, 0) <> 0 OR ISNULL(@ExistingDarsad, 0) <> 0
+			BEGIN
+				-- کاربر خودش قبلاً روی همین سطر دستی مبلغ/درصد وارد کرده — یعنی هشدارِ قبلی را دیده
+				-- و آگاهانه پذیرفته که هر دو نفر پورسانت بگیرند. دست‌نخورده می‌ماند؛ محاسبه‌ی خودکار
+				-- روی آن سوار نمی‌شود، فقط پیام برای شفافیت به‌روز می‌شود.
+				PRINT N'توجه: پورسانتِ دستیِ ' + @VisitorID + N' کنارِ پورسانتِ ' + @ConflictCust + N' نگه داشته شد و بازمحاسبه نشد.';
+				UPDATE dbo.VISITOR_DTL
+				SET LOG = N'توجه: این مبلغ/درصد کنارِ پورسانتِ ' + @ConflictCust + N' نگه داشته شده و خودکار بازمحاسبه نمی‌شود؛ اگر اشتباه است دستی اصلاح کنید.'
+				WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID;
+			END
+			ELSE
+			BEGIN
+				DECLARE @ConflictMsg NVARCHAR(500) = N'هشدار: پورسانتِ واقعی برای شخصِ دیگری (' + @ConflictCust
+					+ N') قبلاً روی این فاکتور ثبت شده است. ویزیتورِ مسیرِ این مشتری (' + @VisitorID
+					+ N') شناسایی شد، ولی برای جلوگیری از دوبل‌شدنِ ناخواسته‌ی پورسانت، مبلغش صفر ماند. '
+					+ N'اگر واقعاً هر دو نفر باید پورسانت بگیرند، مبلغ/درصدِ این سطر را دستی وارد کنید.';
+
+				PRINT @ConflictMsg;
+
+				UPDATE dbo.VISITOR_DTL
+				SET LOG = @ConflictMsg, TOZIH = @TOZIH_SAFE
+				WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID;
+
+				IF @@ROWCOUNT = 0
+					INSERT INTO dbo.VISITOR_DTL (NUMBER, TAG, CUST_NO, DARSAD, PURSANT, PORID, STAT, TOZIH, LOG)
+					VALUES (@NUMBER, @TAG, @VisitorID, 0, 0, NULL, 0, @TOZIH_SAFE, @ConflictMsg);
+			END;
+
+			RETURN;
+		END;
+
+		-- اگر مبلغ ثابت نبود و تعارضی هم نبود، عملیات به‌روزرسانی یا درج را انجام می‌دهیم
 		UPDATE dbo.VISITOR_DTL
 		SET PURSANT = ROUND(@TotalPorsant, 0),
 			DARSAD = @Darsad,

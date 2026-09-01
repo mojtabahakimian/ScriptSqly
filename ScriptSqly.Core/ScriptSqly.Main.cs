@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Data;
@@ -4445,8 +4445,72 @@ END
                 {
                     try
                     {
-                        db.Execute(@"INSERT INTO TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
-                                     VALUES ('IRAN_SALES_MAP', N'گزارش فروش روی نقشه ایران', 3, 5, 417, GETDATE());");
+                        db.Execute(@"
+-- ثبت دسترسی‌های تفکیک‌شده جدید در TFORMS
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'PFRSKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'PFRSKB', N'پیش فاکتور سایر کاربران را بتواند ببیند', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'FRBSKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'FRBSKB', N'فاکتور برگشت فروش سایر کاربران را بتواند ببیند', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'KHMOST_SKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'KHMOST_SKB', N'فاکتور خرید مستقیم سایر کاربران را بتواند ببیند', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'KHBSKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'KHBSKB', N'فاکتور برگشت خرید سایر کاربران را بتواند ببیند', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'RASSKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'RASSKB', N'برگه رسید انبار سایر کاربران را بتواند ببیند', 3, 6, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'HAVSKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'HAVSKB', N'برگه حواله انبار سایر کاربران را بتواند ببیند', 3, 6, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'VRO_TOL_SKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'VRO_TOL_SKB', N'برگه ورود کالای ساخته شده دیگران را ببیند', 3, 3, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'KHO_MAVA_SKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'KHO_MAVA_SKB', N'برگه خروج مواد اولیه دیگران را ببیند', 3, 3, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'KALA_GARDESH_SKB')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'KALA_GARDESH_SKB', N'گردش کالا و اسناد سایر کاربران را در F12 ببیند', 3, 6, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'SANAD_SEEALL')
+    INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'SANAD_SEEALL', N'اسناد حسابداری ثبت شده توسط دیگران را ببیند', 3, 2, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());
+
+-- سازگاری دسترسی‌های کاربران قبلی: اگر کاربری دسترسی FRSKB داشته، دسترسی‌های جدید نیز برای او فعال شود
+IF EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'FRSKB')
+BEGIN
+    DECLARE @FrskbId INT = (SELECT IDH FROM dbo.TFORMS WHERE FORMNAME = N'FRSKB');
+    
+    INSERT INTO dbo.SAL_CHEK (USERCO, [OBJECT], RUN, SEE, INP, UPD, DEL, CRT)
+    SELECT S.USERCO, T.IDH, S.RUN, S.SEE, S.INP, S.UPD, S.DEL, GETDATE()
+    FROM dbo.SAL_CHEK S
+    CROSS JOIN dbo.TFORMS T
+    WHERE S.[OBJECT] = @FrskbId
+      AND T.FORMNAME IN (N'PFRSKB', N'FRBSKB', N'KHSKB', N'KHMOST_SKB', N'KHBSKB', N'RASSKB', N'HAVSKB', N'VRO_TOL_SKB', N'KHO_MAVA_SKB', N'KALA_GARDESH_SKB', N'SANAD_SEEALL')
+      AND NOT EXISTS (
+          SELECT 1 FROM dbo.SAL_CHEK E WHERE E.USERCO = S.USERCO AND E.[OBJECT] = T.IDH
+      );
+END
+");
+                    }
+                    catch (Exception) { }
+
+                    try
+                    {
+                        db.Execute(@"IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'IRAN_SALES_MAP')
+                                     INSERT INTO TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+                                     VALUES ('IRAN_SALES_MAP', N'گزارش فروش روی نقشه ایران', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());");
                     }
                     catch (Exception) { }
                 }

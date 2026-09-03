@@ -83,33 +83,39 @@ GO
 
 /* ── ۳) ایندکس‌های پشتیبان ───────────────────────────────────────────
    با روشن شدن محدودیت، شرط WHERE همه‌ی کوئری‌های CRM عوض می‌شود.
+   هر بلوک وجود جدولش را جدا چک می‌کند: روی دیتابیسی که ماژول CRM اصلاً
+   رویش نصب نیست، مهاجرت باید بی‌صدا رد شود نه اینکه بشکند.
    روی بعضی دیتابیس‌ها این‌ها از قبل دستی ساخته شده‌اند. */
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = N'IX_COPMANES_USERID_STATUS'
-                 AND object_id = OBJECT_ID(N'dbo.COPMANES'))
+IF OBJECT_ID(N'dbo.COPMANES', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = N'IX_COPMANES_USERID_STATUS'
+                     AND object_id = OBJECT_ID(N'dbo.COPMANES'))
     CREATE NONCLUSTERED INDEX [IX_COPMANES_USERID_STATUS]
         ON [dbo].[COPMANES] ([userid], [STATUS]);
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = N'IX_CRMEVENTS_USERID'
-                 AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
+IF OBJECT_ID(N'dbo.CRMEVENTS', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = N'IX_CRMEVENTS_USERID'
+                     AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
     CREATE NONCLUSTERED INDEX [IX_CRMEVENTS_USERID]
         ON [dbo].[CRMEVENTS] ([USERID])
         INCLUDE ([idc], [NEXT_DATE], [miting], [STATUS]);
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = N'IX_CRMEVENTS_IDC'
-                 AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
+IF OBJECT_ID(N'dbo.CRMEVENTS', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = N'IX_CRMEVENTS_IDC'
+                     AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
     CREATE NONCLUSTERED INDEX [IX_CRMEVENTS_IDC]
         ON [dbo].[CRMEVENTS] ([idc])
         INCLUDE ([STATUS], [NEXT_DATE], [NEXT_TIME], [miting]);
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = N'IX_CRMEVENTS_NEXTDATE'
-                 AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
+IF OBJECT_ID(N'dbo.CRMEVENTS', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = N'IX_CRMEVENTS_NEXTDATE'
+                     AND object_id = OBJECT_ID(N'dbo.CRMEVENTS'))
     CREATE NONCLUSTERED INDEX [IX_CRMEVENTS_NEXTDATE]
         ON [dbo].[CRMEVENTS] ([NEXT_DATE])
         INCLUDE ([idc], [miting], [STATUS], [USERID]);

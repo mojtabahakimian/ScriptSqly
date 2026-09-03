@@ -2089,12 +2089,25 @@ BEGIN
                     END
                     ELSE IF @ITEM_BASIS = 2
                     BEGIN
-                        SET @CALC_AMOUNT = CASE
-                            WHEN @MONTHLY_PRORATE = 1
-                                THEN CAST(@ITEM_AMOUNT * (@PAY_DAYS / CAST(@MONTH_DAYS AS DECIMAL(5,2))) AS BIGINT)
-                            ELSE CAST(@ITEM_AMOUNT * @PRORATE_FACTOR AS BIGINT)
-                        END;
-                        SET @INS_CALC_AMOUNT = @CALC_AMOUNT;
+                        IF @MONTHLY_PRORATE = 1
+                        BEGIN
+                            -- اقلام ماهیانه (حق تأهل/جذب/شرایط محیط کار/مسئولیت/سایر ثابت) دقیقاً با همان
+                            -- قاعده خواربار و مسکن/بن کارگری نسبت‌گیری می‌شوند: مخرج ثابت ۳۰ روز و
+                            -- آستانه «۲۸ روز و بیشتر = ماه کامل».
+                            -- دو ریل جدا (مطابق INS_BASE_DAYS / PAY_BASE_DAYS آیتم):
+                            --   پرداختی  ← کارکرد رسمی (DAYSB)
+                            --   بیمه/مالیات ← کارکرد اسمی (DAYS)
+                            -- تا حالتی که بیمه کامل رد می‌شود ولی پرداختی به‌نسبت کارکرد است پشتیبانی شود.
+                            SET @FULL_MONTH     = CASE WHEN @BASE_DAYS_RAW >= 28 THEN CAST(@ITEM_AMOUNT AS BIGINT) ELSE CAST(@ITEM_AMOUNT * (@BASE_DAYS_RAW / 30.0) AS BIGINT) END;
+                            SET @FULL_MONTH_INS = CASE WHEN @INS_DAYS_RAW  >= 28 THEN CAST(@ITEM_AMOUNT AS BIGINT) ELSE CAST(@ITEM_AMOUNT * (@INS_DAYS_RAW  / 30.0) AS BIGINT) END;
+                            SET @CALC_AMOUNT     = CAST(@FULL_MONTH     * @PRORATE_FACTOR AS BIGINT);
+                            SET @INS_CALC_AMOUNT = CAST(@FULL_MONTH_INS * @PRORATE_FACTOR AS BIGINT);
+                        END
+                        ELSE
+                        BEGIN
+                            SET @CALC_AMOUNT     = CAST(@ITEM_AMOUNT * @PRORATE_FACTOR AS BIGINT);
+                            SET @INS_CALC_AMOUNT = @CALC_AMOUNT;
+                        END
                     END
                     ELSE IF @ITEM_BASIS = 1
                     BEGIN

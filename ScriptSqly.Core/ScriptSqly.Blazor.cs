@@ -16,8 +16,6 @@ namespace ScriptSqly.Migrations
 								       [UserId]   INT            NOT NULL PRIMARY KEY,
 								       [StateJson] NVARCHAR(MAX) NOT NULL
 								   );"); } catch { }
-
-            CrmAclScript(db);
         }
 
         /// <summary>
@@ -29,6 +27,11 @@ namespace ScriptSqly.Migrations
         /// ⚠️ اجرای این متد به‌تنهایی هیچ رفتاری را عوض نمی‌کند: کلید
         /// CRM_ACL_ENFORCE با مقدار '0' (خاموش) ساخته می‌شود. فعال‌سازی دستی
         /// است و در انتهای فایل .sql توضیح داده شده.
+        ///
+        /// از LetsGo بدون هیچ شرطی صدا زده می‌شود، نه از BlazorDbScriptUpdate.
+        /// آن متد داخل if (isCustomCall) است و isCustomCall فقط وقتی true
+        /// می‌شود که DEED_HED خالی باشد — یعنی روی دیتابیس واقعی مشتری
+        /// هرگز اجرا نمی‌شود. اینجا قرارش ندهید.
         ///
         /// برخلاف بلوک بالا، اینجا از try/catch سراسری استفاده نشده و شرط‌ها
         /// صریحاً IF NOT EXISTS هستند. دلیلش این است که در یک مهاجرتِ دسترسی،

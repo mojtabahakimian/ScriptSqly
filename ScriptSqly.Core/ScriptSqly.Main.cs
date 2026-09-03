@@ -29,6 +29,20 @@ namespace ScriptSqly.Migrations
                 {
                     CostCloseScript(db);
                 }
+
+                // کنترل دسترسی CRM — عمداً بیرون از هر شرطی.
+                //
+                // این متد قبلاً داخل BlazorDbScriptUpdate بود که از بلوک
+                // if (isCustomCall) پایین‌تر صدا زده می‌شود. ولی isCustomCall
+                // فقط وقتی true می‌شود که DEED_HED خالی باشد — یعنی دیتابیس
+                // تازه. روی دیتابیس واقعی مشتری که سند دارد، آن بلوک هرگز
+                // اجرا نمی‌شود و مهاجرت بی‌صدا رد می‌شد؛ Runner هم
+                // «completed successfully» می‌گفت چون خطایی رخ نداده بود.
+                //
+                // خودش idempotent است و همه‌ی بلوک‌هایش IF NOT EXISTS دارند،
+                // پس اجرای هر باره‌اش بی‌هزینه است.
+                CrmAclScript(db);
+
                 //try { db.Execute($@""); } catch { }
 
                 var SanadCount = db.Query<double?>("SELECT COUNT(*) FROM dbo.DEED_HED").FirstOrDefault();

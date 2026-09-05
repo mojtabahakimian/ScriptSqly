@@ -2074,11 +2074,36 @@ BEGIN
 					  END;
 
 	-- ========== ۳. یافتن الگوی پورسانت ==========
-	SELECT TOP (1) @PORID = PORID FROM dbo.SALA_DTL
-	WHERE HES = @VisitorID AND PORID IS NOT NULL
-	ORDER BY CRT DESC, IDD DESC;
+	-- اولویت با چیزی است که همین حالا روی سطرِ خودِ فاکتور ثبت شده:
+	--   • الگو انتخاب شده باشد  → همان الگو (نه الگوی پیش‌فرضِ ویزیتور).
+	--   • الگو انتخاب نشده ولی درصد/مبلغ وارد شده باشد → یعنی کاربر آگاهانه بدون الگو
+	--     کار می‌کند؛ مبلغ از «درصد × مبنای فاکتور» می‌آید و الگویی تحمیل نمی‌شود.
+	--   • سطر نباشد یا خالی باشد → مثل گذشته، الگوی پیش‌فرضِ ویزیتور (SALA_DTL).
+	-- تا امروز این رویه در هر سه حالت سراغ SALA_DTL.PORID می‌رفت و همان را روی
+	-- VISITOR_DTL.PORID می‌نوشت؛ یعنی هم انتخابِ الگو روی فاکتور بی‌صدا بازنویسی
+	-- می‌شد و هم درصدی که کاربر دستی زده بود با مبلغِ الگوی پیش‌فرض عوض می‌شد.
+	DECLARE @NoPattern BIT = 0;
+	DECLARE @RowDarsad FLOAT = NULL, @RowPursant FLOAT = NULL;
+
+	SELECT TOP (1) @PORID = PORID,
+				   @RowDarsad = ISNULL(DARSAD, 0),
+				   @RowPursant = ISNULL(PURSANT, 0)
+	FROM dbo.VISITOR_DTL
+	WHERE NUMBER = @NUMBER
+		  AND TAG = @TAG
+		  AND CUST_NO = @VisitorID
+	ORDER BY CASE WHEN PORID IS NOT NULL THEN 0 ELSE 1 END;   -- سطرِ دارای الگو مقدم است
 
 	IF @PORID IS NULL
+	   AND (ISNULL(@RowDarsad, 0) <> 0 OR ISNULL(@RowPursant, 0) <> 0)
+		SET @NoPattern = 1;
+
+	IF @PORID IS NULL AND @NoPattern = 0
+		SELECT TOP (1) @PORID = PORID FROM dbo.SALA_DTL
+		WHERE HES = @VisitorID AND PORID IS NOT NULL
+		ORDER BY CRT DESC, IDD DESC;
+
+	IF @PORID IS NULL AND @NoPattern = 0
 	BEGIN
 		PRINT N'خطا: الگوی پیش فرض پورسانت (PORID) برای حساب ویزیتور یافت نشد' + @VisitorID;
 		UPDATE dbo.VISITOR_DTL
@@ -2107,47 +2132,131 @@ BEGIN
 	END;
 
 	-- ========== ۴. بررسی کالاهای فاقد الگو ==========
+	-- نرخِ «قابل استفاده» هر کالا در این الگو. عیناً همان قاعده‌ای که سمت برنامه
+	-- (AUTO_BAZ.Functions.CL_PORSANT_RULE) دارد:
+	--   • سطر تکراری با نرخ یکسان → همان یک نرخ، نه دو برابر (LEFT JOIN مستقیم به
+	--     VISITORS_PORSANT_KALA سهم آن کالا را دوبار حساب می‌کرد).
+	--   • سطر تکراری با نرخ‌های ناهم‌خوان یا نرخِ خالی → «بدون نرخ»، چون معلوم نیست
+	--     کدام درست است و حدس‌زدن یعنی نوشتن مبلغِ اشتباه در سند.
+	-- COUNT(PORSANT) سطرهای NULL را نمی‌شمارد؛ برابری‌اش با COUNT(*) یعنی هیچ سطری بی‌نرخ نیست.
+	-- (نرخ‌ها عمداً در جدولِ موقت ریخته نمی‌شوند و هر بار مستقیم از خودِ جدول خوانده
+	--  می‌شوند: جدولِ موقت طول و Collation ستون CODE را تحمیل می‌کند و روی دیتابیس‌های
+	--  قدیمیِ این برنامه می‌تواند خطای بریدنِ رشته یا تعارض Collation بدهد.)
 	DECLARE @MissingItemName NVARCHAR(80);
-	DECLARE MissingItemsCursor CURSOR FOR
-	SELECT SD.NAME
-	FROM dbo.INVO_LST IL
-		JOIN dbo.STUF_DEF SD
-			ON IL.CODE = SD.CODE
-		LEFT JOIN dbo.VISITORS_PORSANT_KALA VPK
-			ON IL.CODE = VPK.CODE
-			   AND VPK.PORID = @PORID
-	WHERE IL.NUMBER = @NUMBER
-		  AND IL.TAG = @TAG
-		  AND VPK.PORID IS NULL;
-	OPEN MissingItemsCursor;
-	FETCH NEXT FROM MissingItemsCursor
-	INTO @MissingItemName;
-	WHILE @@FETCH_STATUS = 0
+
+	IF @NoPattern = 0
 	BEGIN
-		PRINT N'تذکر مهم: کالای «' + @MissingItemName + N'» برای این ویزیتور الگو ندارد.';
+		-- LOCAL: کرسر سراسری با نامِ ثابت، اگر دو کاربر هم‌زمان فاکتور ذخیره کنند
+		-- خطای «کرسری با این نام از قبل هست» می‌دهد و کلِ محاسبه را می‌خواباند.
+		DECLARE MissingItemsCursor CURSOR LOCAL FAST_FORWARD FOR
+		SELECT ISNULL(SD.NAME, IL.CODE)
+		FROM dbo.INVO_LST IL
+			LEFT JOIN dbo.STUF_DEF SD
+				ON IL.CODE = SD.CODE
+			LEFT JOIN
+			(
+				SELECT CODE, MIN(PORSANT) AS PORSANT
+				FROM dbo.VISITORS_PORSANT_KALA
+				WHERE PORID = @PORID
+				GROUP BY CODE
+				HAVING COUNT(PORSANT) = COUNT(*) AND MIN(PORSANT) = MAX(PORSANT)
+			) AS R
+				ON R.CODE = IL.CODE
+		WHERE IL.NUMBER = @NUMBER
+			  AND IL.TAG = @TAG
+			  AND ISNULL(IL.JAY, 0) = 0
+			  AND (ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0)) <> 0
+			  AND R.CODE IS NULL;
+		OPEN MissingItemsCursor;
 		FETCH NEXT FROM MissingItemsCursor
 		INTO @MissingItemName;
+		WHILE @@FETCH_STATUS = 0
+		BEGIN
+			PRINT N'تذکر مهم: کالای «' + @MissingItemName + N'» برای این ویزیتور الگو ندارد.';
+			FETCH NEXT FROM MissingItemsCursor
+			INTO @MissingItemName;
+		END;
+		CLOSE MissingItemsCursor;
+		DEALLOCATE MissingItemsCursor;
 	END;
-	CLOSE MissingItemsCursor;
-	DEALLOCATE MissingItemsCursor;
 
-	-- ========== ۵. محاسبه پورسانت ==========
-	SELECT @TotalPorsant = SUM(ISNULL(VPK.PORSANT, 0) / 100.0 * (IL.MABL_K - ISNULL(IL.N_MOIN, 0))),
-		   @TotalMablk = SUM(IL.MABL_K - ISNULL(IL.N_MOIN, 0))
-	FROM dbo.INVO_LST AS IL
-		LEFT JOIN dbo.VISITORS_PORSANT_KALA AS VPK
-			ON IL.CODE = VPK.CODE
-			   AND VPK.PORID = @PORID
-	WHERE IL.NUMBER = @NUMBER
-		  AND IL.TAG = @TAG
-		  AND ISNULL(IL.JAY, 0) = 0;
+	-- ========== ۵. مبنای فاکتور و محاسبه پورسانت ==========
+	-- مبنا عیناً همان چیزی است که فرم فاکتور و صدور سند استفاده می‌کنند:
+	--     جمع اقلام − تخفیف سربرگ [+ ارزش افزوده اگر گزینه ۶۲ سازمان «۵» باشد]
+	DECLARE @IncludeVat BIT = 0;
+	SELECT TOP (1) @IncludeVat = CASE WHEN SUBSTRING(OPTIONSS, 62, 1) = N'5' THEN 1 ELSE 0 END
+	FROM dbo.SAZMAN
+	WHERE OPTIONSS IS NOT NULL;
 
-	-- ========== ۶. محاسبه درصد نهایی ==========
-	IF ISNULL(@TotalMablk, 0) > 0
-	   AND ISNULL(@TotalPorsant, 0) > 0
-		SET @Darsad = (@TotalPorsant / @TotalMablk) * 100.0;
+	DECLARE @InvoiceBase FLOAT;
+	DECLARE @SumMablk FLOAT = 0, @HeadTakhfif FLOAT = 0, @HeadMbaa FLOAT = 0;
+
+	SELECT @SumMablk = SUM(ISNULL(MABL_K, 0))
+	FROM dbo.INVO_LST
+	WHERE NUMBER = @NUMBER AND TAG = @TAG;
+
+	-- تخفیف و ارزش افزوده روی سربرگ «فاکتور فروش» (TAG = 13) می‌نشیند، نه روی سربرگ
+	-- «حواله» (TAG = 2)؛ صدور سند هم از همان سطر می‌خواند. اگر سطر ۱۳ نبود (مسیرهای
+	-- دیگر یا داده‌ی قدیمی)، سربرگ خودِ همین تگ ملاک است.
+	SELECT TOP (1) @HeadTakhfif = ISNULL(TAKHFIF, 0), @HeadMbaa = ISNULL(MBAA, 0)
+	FROM dbo.HEAD_LST
+	WHERE NUMBER = @NUMBER
+		  AND TAG = CASE WHEN @TAG = 2 THEN 13 ELSE @TAG END;
+
+	IF @@ROWCOUNT = 0
+		SELECT TOP (1) @HeadTakhfif = ISNULL(TAKHFIF, 0), @HeadMbaa = ISNULL(MBAA, 0)
+		FROM dbo.HEAD_LST
+		WHERE NUMBER = @NUMBER AND TAG = @TAG;
+
+	SET @InvoiceBase = ISNULL(@SumMablk, 0) - @HeadTakhfif
+					   + CASE WHEN @IncludeVat = 1 THEN @HeadMbaa ELSE 0 END;
+
+	IF @NoPattern = 1
+	BEGIN
+		-- سطر بدون الگو: مبلغ = درصدِ همین سطر × مبنای فاکتور. همان قاعده‌ای که صدور
+		-- سند و فرم فاکتور برای سطرهای بدون الگو اجرا می‌کنند.
+		SET @Darsad = ISNULL(@RowDarsad, 0);
+		SET @TotalPorsant = ROUND(@InvoiceBase * @Darsad / 100.0, 0);
+		SET @TotalMablk = @InvoiceBase;
+	END;
 	ELSE
-		SET @Darsad = 0;
+	BEGIN
+		-- سطر دارای الگو: مبلغ = جمعِ سهمِ کالاهایی که در همین الگو نرخ دارند.
+		-- گِردکردن ردیف‌به‌ردیف است، نه یک‌جا در انتها: صدور سند (GENSANADFROOSH) هم
+		-- دقیقاً همین کار را می‌کند و گِردکردنِ یک‌جا چند ریال اختلاف می‌ساخت — همان چند
+		-- ریالی که فاکتور را برای همیشه در فهرست «کنترل پورسانت فاکتور فروش» نگه می‌داشت.
+		SELECT @TotalPorsant = SUM(ROUND((ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0)) * R.PORSANT / 100.0, 0)),
+			   @TotalMablk = SUM(ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0))
+		FROM dbo.INVO_LST AS IL
+			INNER JOIN
+			(
+				-- سطر تکراری با نرخ یکسان → همان یک نرخ (نه دو برابر، که LEFT JOIN مستقیمِ
+				-- قبلی می‌داد)؛ سطر تکراری با نرخ‌های ناهم‌خوان یا نرخِ خالی → «بدون نرخ»،
+				-- چون معلوم نیست کدام درست است. COUNT(PORSANT) سطرهای NULL را نمی‌شمارد.
+				SELECT CODE, MIN(PORSANT) AS PORSANT
+				FROM dbo.VISITORS_PORSANT_KALA
+				WHERE PORID = @PORID
+				GROUP BY CODE
+				HAVING COUNT(PORSANT) = COUNT(*) AND MIN(PORSANT) = MAX(PORSANT)
+			) AS R
+				ON R.CODE = IL.CODE
+		WHERE IL.NUMBER = @NUMBER
+			  AND IL.TAG = @TAG
+			  AND ISNULL(IL.JAY, 0) = 0;
+
+		SET @TotalPorsant = ISNULL(@TotalPorsant, 0);
+		SET @TotalMablk = ISNULL(@TotalMablk, 0);
+
+		-- ========== ۶. محاسبه درصد نهایی ==========
+		-- درصد = مبلغ پورسانت ÷ مبنای کل فاکتور، نه ÷ جمع کالاهای دارای نرخ. تقسیم بر
+		-- جمعِ کالاهای دارای نرخ، سطری را که مثلاً ۸۰ هزار تومان پورسانت گرفته بود «۲٪»
+		-- نشان می‌داد، و چون فرم مبلغ را از همین درصد و مبنای کل می‌سازد، مبلغ به ۲٪ کلِ
+		-- فاکتور می‌پرید و صدور سند دوباره برش می‌گرداند — رفت‌وبرگشتی بی‌پایان.
+		IF ISNULL(@InvoiceBase, 0) <> 0
+			SET @Darsad = @TotalPorsant / @InvoiceBase * 100.0;
+		ELSE
+			SET @Darsad = 0;
+	END;
 
 	-- ========== ۷. درج یا به‌روزرسانی نهایی با بررسی هوشمندانه STAT ==========
 
@@ -2231,8 +2340,9 @@ BEGIN
 		END;
 
 		-- اگر مبلغ ثابت نبود و تعارضی هم نبود، عملیات به‌روزرسانی یا درج را انجام می‌دهیم
+		-- @TotalPorsant از قبل ردیف‌به‌ردیف گِرد شده است
 		UPDATE dbo.VISITOR_DTL
-		SET PURSANT = ROUND(@TotalPorsant, 0),
+		SET PURSANT = @TotalPorsant,
 			DARSAD = @Darsad,
 			PORID = @PORID,
 			LOG = @LOG_SAFE,
@@ -2256,15 +2366,16 @@ BEGIN
 				LOG
 			)
 			VALUES
-			(@NUMBER, @TAG, @VisitorID, @Darsad, ROUND(@TotalPorsant, 0), @PORID, 0, @TOZIH_SAFE, @LOG_SAFE);
+			(@NUMBER, @TAG, @VisitorID, @Darsad, @TotalPorsant, @PORID, 0, @TOZIH_SAFE, @LOG_SAFE);
 		END;
 
 		-- فقط در صورتی که عملیات انجام شده باشد، پیام موفقیت را نمایش می‌دهیم
 		PRINT N'محاسبه پورسانت با موفقیت برای شماره سند: ' + CAST(CAST(@NUMBER AS BIGINT) AS VARCHAR) + N' و ویزیتور: '
 			  + @VisitorID + N' انجام شد.';
 		PRINT N'روش شناسایی/تایید: ' + ISNULL(@IdentificationMethod, N'نامشخص');
-		PRINT N'مبلغ کل (Mablk): ' + CAST(ISNULL(@TotalMablk, 0) AS VARCHAR);
-		PRINT N'پورسانت کل (Porsant): ' + CAST(ROUND(ISNULL(@TotalPorsant, 0), 0) AS VARCHAR);
+		PRINT N'مبلغ مشمول الگو (Mablk): ' + CAST(ISNULL(@TotalMablk, 0) AS VARCHAR);
+		PRINT N'مبنای کل فاکتور (Base): ' + CAST(ISNULL(@InvoiceBase, 0) AS VARCHAR);
+		PRINT N'پورسانت کل (Porsant): ' + CAST(ISNULL(@TotalPorsant, 0) AS VARCHAR);
 		PRINT N'درصد نهایی (Darsad): ' + CAST(ISNULL(@Darsad, 0) AS VARCHAR);
 	END;
 END;

@@ -3380,6 +3380,26 @@ GO
    نداشتند (فرمول تعريف شده ولي هنوز مصرف نشده)، ميانگين ساده جايگزين
    وزن مي‌شود — دقيقاً همان قاعده‌اي که CHK-09 در S00 هم استفاده مي‌کند.
    ═══════════════════════════════════════════════════════════════════ */
+
+/* قاعده‌ي CHK-22 عمداً همين‌جاست و نه در seed جدا: تنها جايي که ثبتش
+   مي‌کند همين رويه است، و اگر seed جدا بماند مي‌شود همان تلهٔ
+   «اسکريپت نصف‌ونيمه» که قبلاً هم خورده‌ايم. */
+MERGE dbo.CC_CheckRule AS t
+USING (VALUES
+ ('CHK-22', N'ميانگين انبار منفي — به‌عنوان نرخ پذيرفته نشد', 'S11', 24, 2,
+  N'نرخِ موادِ هر واحد نمي‌تواند منفي باشد. ريشه‌اش معمولاً کاردکسِ منفي (CHK-01) يا سندي است که مقدارش ثبت شده ولي مبلغش نه. تا وقتي اين درست نشود بهاي اين کالا از فرمول/آخرين ميانگين مي‌آيد، نه از گردشِ اين ماه.', 51)
+) AS s (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, RemedyText, SortOrder)
+ON t.RuleCode = s.RuleCode
+WHEN MATCHED THEN UPDATE SET
+    t.RuleName = s.RuleName, t.StepCode = s.StepCode, t.ExType = s.ExType,
+    t.DefaultSeverity = s.DefaultSeverity,
+    t.RemedyText = s.RemedyText, t.SortOrder = s.SortOrder
+WHEN NOT MATCHED THEN INSERT
+    (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, RemedyText, SortOrder)
+    VALUES (s.RuleCode, s.RuleName, s.StepCode, s.ExType, s.DefaultSeverity,
+            s.RemedyText, s.SortOrder);
+GO
+
 CREATE OR ALTER PROCEDURE dbo.CC_sp_S11_PropagateRates
     @RunId  INT,
     @Month  TINYINT,
@@ -3539,18 +3559,69 @@ BEGIN
        بعد فقط ۳۵٪ از تغيير اعمال مي‌شود. */
     DECLARE @Damping FLOAT = 0.35;
 
+    /* ─── دروازه‌ي «نرخِ ممکن» ───
+       ⚠️ فيکسِ واگراييِ کد ۳۳۶۵ (ماه ۵، ران ۱۰ — روي داده‌ي واقعي تشخيص
+       داده شد): ميانگينِ انبارِ اين کالا يک بار منفي درآمد. همان عدد
+       به‌عنوان SMABL در فرمول نوشته شد؛ رسيدِ توليدِ هر کالايي که ۳۳۶۵
+       مصرف مي‌کند منفي شد؛ ميانگينِ انبارِ آن کالاها هم منفي شد؛ و دورِ
+       بعد همان اعداد دوباره به‌عنوان «نرخ» برگشتند. يک عددِ بد به ۳۱ کالا
+       سرايت کرد و حلقه‌ي همگرايي هرگز تمام نشد.
+
+       نرخِ موادِ هر واحد نه منفي مي‌شود و نه نجومي — اين مسئله‌ي تلورانس
+       نيست، يک تناقض است. عددِ ناممکن پذيرفته نمي‌شود: کالا به مسيرِ
+       عاديِ خودش برمي‌گردد (کاسکيدِ فرمول، يا آخرين ميانگينِ کاردکس) و
+       استثنا ثبت مي‌شود تا کاربر ببيندش، نه اينکه بي‌صدا در بها بنشيند.
+
+       ── چرا سقف ۲^۵۳ و نه يک عددِ تجربي ──
+       وسوسه‌ي اول اين بود که سقف را از داده در بياوريم (مثلاً گران‌ترين
+       خريدِ تاريخِ شرکت ضربدر هزار). ولي آن يک حدسِ تجاري است و با رشدِ
+       قيمت‌ها بايد دستکاري شود. ۲^۵۳ يک حقيقتِ محاسباتي است: FLOAT بالاي
+       آن عددِ صحيح را دقيق نگه نمي‌دارد، پس عددِ ريالِ بزرگ‌تر از آن ديگر
+       حسابداري نيست، نويز است. براي مقياس: گران‌ترين خريدِ ثبت‌شده در
+       اين پايگاه ۲۴۰ ميليون ريال بر واحد است — ۳۷ ميليون برابر زيرِ اين
+       سقف. هيچ نرخِ واقعي به آن نزديک نمي‌شود.
+
+       و ميرايي فقط ميانِ دو مقدارِ *ممکن* معنا دارد. وقتي مقدارِ قبلي
+       خودش خراب است، ۳۵٪ـ۳۵٪ برگشتن از ۱e15 حدود ۷۷ دور طول مي‌کشد —
+       بيشتر از سقفِ حلقه، پس اجرا با همان عددِ خراب تمام مي‌شد. از
+       مقدارِ مسموم مستقيم به هدف مي‌پريم. */
+    DECLARE @RateCeiling FLOAT = 9007199254740992;   -- ۲^۵۳
+
+    IF OBJECT_ID('tempdb..#Z') IS NOT NULL DROP TABLE #Z;
+
+    SELECT  k.code                                  AS Code,
+            SUM(k.MABL_K) / NULLIF(SUM(k.MEGHk), 0) AS fi
+    INTO    #Z
+    FROM    dbo.KALAS k
+    WHERE   k.TAG = 10 AND k.MM = @Month AND k.MEGHk <> 0
+    GROUP BY k.code;
+
+    DELETE dbo.CC_Exception WHERE RunId = @RunId AND RuleCode = 'CHK-22';
+
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, Code, Amount, Description)
+    SELECT  @RunId, 'S11', 'CHK-22', 24, 2, z.Code, z.fi,
+            CASE WHEN z.fi <= 0
+                 THEN N'ميانگين انبارِ اين کالا منفي درآمد و به‌عنوان نرخ پذيرفته نشد'
+                 ELSE N'ميانگين انبارِ اين کالا خارج از هر مقياسِ ممکن است و پذيرفته نشد'
+            END
+    FROM    #Z z
+    WHERE   z.fi IS NOT NULL AND (z.fi <= 0 OR ABS(z.fi) >= @RateCeiling);
+
     UPDATE  c
-       SET  c.Mat = CASE WHEN prev.MaterialCost IS NULL THEN z.fi
-                          ELSE prev.MaterialCost + @Damping * (z.fi - prev.MaterialCost) END,
+       SET  c.Mat = CASE
+                      -- ميرايي فقط وقتي مقدارِ قبلي خودش ممکن باشد
+                      WHEN prev.MaterialCost > 0
+                       AND prev.MaterialCost < @RateCeiling
+                      THEN prev.MaterialCost + @Damping * (z.fi - prev.MaterialCost)
+                      ELSE z.fi
+                    END,
             c.Src = 1
     FROM    #C c
-    JOIN   (SELECT k.code, SUM(k.MABL_K) / NULLIF(SUM(k.MEGHk), 0) AS fi
-            FROM   dbo.KALAS k
-            WHERE  k.TAG = 10 AND k.MM = @Month AND k.MEGHk <> 0
-            GROUP BY k.code) z ON z.code = c.Code
+    JOIN    #Z z ON z.Code = c.Code
     LEFT    JOIN dbo.CC_ItemCost prev
             ON  prev.RunId = @RunId AND prev.Code = c.Code
-    WHERE   z.fi IS NOT NULL;
+    WHERE   z.fi > 0 AND z.fi < @RateCeiling;
 
     ---- بدون گردش در ماه: آخرين نرخ ميانگين ثبت‌شده
     UPDATE  c

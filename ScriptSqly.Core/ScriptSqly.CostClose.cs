@@ -2100,8 +2100,30 @@ BEGIN
        دقیقاً صفر نمی‌شود؛ این آستانه برای فیلتر همین نویز است، نه برای
        نادیده گرفتن کمبود واقعی. پیش‌فرض -0.001.
        ───────────────────────────────────────────────────────────── */
-    DECLARE @Chk01Threshold DECIMAL(18,6) =
-        ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode = 'CHK-01'), -0.001);
+    /* آستانه از «واحد» به «ريال» تغيير کرد: آستانه‌ي مطلقِ واحد نمي‌تواند
+       هم‌زمان براي کالاي تُني و کالاي گرمي درست باشد. مايه پنير (۲۱۸۶)
+       حواله‌هايش ۰٫۰۰۲ واحد است، پس ۰٫۰۱- بيش از سه برابرِ يک حواله بود و
+       کلِ گردشش زير آستانه مي‌افتاد. */
+    DECLARE @Chk01Rial DECIMAL(18,2) =
+        ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode = 'CHK-01'), 1000);
+
+    DECLARE @Chk01QtyFloor DECIMAL(18,9) = -0.000001;
+
+    IF OBJECT_ID('tempdb..#Nerkh') IS NOT NULL DROP TABLE #Nerkh;
+
+    SELECT  Anbar, code, Nerkh
+    INTO    #Nerkh
+    FROM   (SELECT i.ANBAR AS Anbar, TRY_CAST(i.CODE AS BIGINT) AS code,
+                   i.AVRAGE AS Nerkh,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY i.ANBAR, TRY_CAST(i.CODE AS BIGINT)
+                       ORDER BY h.DATE_N DESC, i.ID DESC) AS rn
+            FROM   dbo.INVO_LST i
+            JOIN   dbo.HEAD_LST h ON h.NUMBER = i.NUMBER AND h.TAG = i.TAG
+            WHERE  i.AVRAGE > 0) x
+    WHERE  rn = 1;
+
+    CREATE CLUSTERED INDEX IX_Nerkh ON #Nerkh(Anbar, code);
 
     IF OBJECT_ID('tempdb..#PM') IS NOT NULL DROP TABLE #PM;
 
@@ -2263,12 +2285,16 @@ BEGIN
         FROM    AllMovement
     ),
     AvvalinManfi AS (
-        SELECT  Anbar, code, DATE_N, NUMBER, TAG, Tartib, Mande,
+        SELECT  t.Anbar, t.code, t.DATE_N, t.NUMBER, t.TAG, t.Tartib, t.Mande,
+                ISNULL(n.Nerkh, 0) AS Nerkh,
                 ROW_NUMBER() OVER (
-                    PARTITION BY Anbar, code
-                    ORDER BY DATE_N, Tartib, NUMBER) AS rn
-        FROM    Tajamoi
-        WHERE   Mande < @Chk01Threshold
+                    PARTITION BY t.Anbar, t.code
+                    ORDER BY t.DATE_N, t.Tartib, t.NUMBER) AS rn
+        FROM    Tajamoi t
+        LEFT    JOIN #Nerkh n ON n.Anbar = t.Anbar AND n.code = t.code
+        WHERE   t.Mande < @Chk01QtyFloor
+          AND   (   (n.Nerkh IS NOT NULL AND ABS(t.Mande) * n.Nerkh > @Chk01Rial)
+                 OR (n.Nerkh IS NULL     AND t.Mande < -0.01) )
     )
     INSERT dbo.CC_Exception
         (RunId, StepCode, RuleCode, ExType, Severity,

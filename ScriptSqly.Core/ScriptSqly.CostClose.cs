@@ -3295,7 +3295,14 @@ BEGIN
                     WHERE fx.UnitId = @UnitId AND TRY_CAST(fx.CODE AS BIGINT) = ca.CODE AND fx.IsFixed = 1
                 );
 
-        IF ABS(@absWipFixed - @absTotal) > 10000000
+        /* آستانه از CC_CheckRule، نه عددِ هاردکد. قاعده‌ي صاحب پروژه:
+           انحراف زير ۱۰۰۰ ريال صفر است. با سقفِ ده‌ميليونيِ قبلي،
+           اختلافِ نُه‌ميليوني ديده نمي‌شد و گامِ «جذب دستمزد صفر»
+           بي‌سروصدا ناتمام مي‌ماند. */
+        DECLARE @thr08 FLOAT =
+            ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode = 'CHK-08'), 1000);
+
+        IF ABS(@absWipFixed - @absTotal) > @thr08
             INSERT dbo.CC_Exception
                 (RunId, StepCode, RuleCode, ExType, Severity, Amount, Description)
             VALUES (@RunId, 'S10', 'CHK-08', 10, 1, @absWipFixed - @absTotal,
@@ -4303,6 +4310,10 @@ BEGIN
            AND ABS(ISNULL(AmountVariance, 0)) > @total * 0.01;
 
     ---- CHK-11: انحراف روي ماده‌اي که در هيچ فرمولي مصرف نشده
+    /* آستانه لازم است: قبلاً هر رديفِ انحراف گزارش مي‌شد، حتي صفر. */
+    DECLARE @thr11 FLOAT =
+        ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode = 'CHK-11'), 1000);
+
     DELETE dbo.CC_Exception WHERE RunId = @RunId AND RuleCode = 'CHK-11';
 
     INSERT dbo.CC_Exception
@@ -4311,7 +4322,8 @@ BEGIN
             N'انحراف روي ماده‌اي که در هيچ فرمول اين ماه مصرف نشده'
     FROM    dbo.CC_Variance v
     WHERE   v.RunId = @RunId
-      AND   ISNULL(v.ConsumedQty, 0) = 0;
+      AND   ISNULL(v.ConsumedQty, 0) = 0
+      AND   ABS(ISNULL(v.AmountVariance, 0)) > @thr11;
 
     INSERT dbo.CC_RunLog (RunId, StepCode, Severity, Message, ContextJson)
     SELECT  @RunId, 'S08', 1,

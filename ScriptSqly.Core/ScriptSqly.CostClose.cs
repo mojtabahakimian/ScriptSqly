@@ -7775,6 +7775,37 @@ GO
             TryExecuteCostCloseBatch(db, aiConversation,
                 "AI_Conversation و AI_sp_TouchConversation",
                 "اسکريپت 32-ai-conversation.sql را اجرا کنيد (تاريخچه گفتگوهاي دستيار).");
+
+            // --- 33-gate-blocking-rules.sql ---
+            string gateBlocking = @"
+/* کدام کنترل اجازه دارد اجرا را متوقف کند.
+
+   تا امروز دروازه‌ي S05 هر استثنايي با Severity=2 را مسدودکننده
+   مي‌شمرد — ده قاعده اين شدت را دارند، و روي يک ماهِ واقعي يعني
+   ايستادن پشتِ CHK-02 (۲۲۳ مورد) و CHK-17 (۴۸ مورد).
+
+   ولي CHK-02 در گامِ ششمِ کارِ صاحب پروژه رفع مي‌شود، بعد از صدور
+   اسناد گروهي؛ تا آن اسناد نباشند مغايرتِ کاردکس و حسابداري اصلاً
+   معنا ندارد. قاعده‌ي او: کاردکس منفي توقف ايجاد کند، بقيه نه.
+
+   Severity براي نمايش است. اگر همان معيارِ توقف هم باشد، هر بار که
+   اهميتِ نمايشيِ چيزي بالا برود ناخواسته اجرا هم متوقف مي‌شود. دو
+   تصميمِ جدا، دو ستون. */
+IF COL_LENGTH('dbo.CC_CheckRule', 'IsBlocking') IS NULL
+    ALTER TABLE dbo.CC_CheckRule
+        ADD IsBlocking BIT NOT NULL CONSTRAINT DF_CC_CheckRule_IsBlocking DEFAULT (0);
+GO
+
+UPDATE dbo.CC_CheckRule SET IsBlocking = 1 WHERE RuleCode =  'CHK-01';
+UPDATE dbo.CC_CheckRule SET IsBlocking = 0 WHERE RuleCode <> 'CHK-01';
+GO
+
+PRINT N'قاعده‌ي توقف: فقط کاردکس منفي (CHK-01) اجرا را متوقف مي‌کند.';
+GO
+";
+            TryExecuteCostCloseBatch(db, gateBlocking,
+                "CC_CheckRule.IsBlocking",
+                "اسکريپت 33-gate-blocking-rules.sql را اجرا کنيد (به CC_CheckRule نياز دارد).");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

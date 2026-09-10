@@ -35,8 +35,8 @@ namespace ScriptSqly.Migrations
                     @"SELECT CASE WHEN OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]',   N'U')  IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[SYS_AUDIT_SESSION]', N'U')  IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[VW_SYS_AUDIT_TIMELINE]', N'V') IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[SP_SYS_AUDIT_PURGE]', N'P')    IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[SP_SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
+                                   AND OBJECT_ID(N'[dbo].[SYS_AUDIT_PURGE]', N'P')    IS NOT NULL
+                                   AND OBJECT_ID(N'[dbo].[SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
                                   THEN 1 ELSE 0 END");
 
                 if (ready == 1) return;
@@ -212,7 +212,20 @@ namespace ScriptSqly.Migrations
 
             // ── پاک‌سازی: تکه‌تکه، تا قفل طولانی روی جدول ایجاد نشود ─────
             // رویداد «باز شدن فرم» پرحجم‌ترین دسته است و زودتر پاک می‌شود.
-            @"CREATE OR ALTER PROCEDURE [dbo].[SP_SYS_AUDIT_PURGE]
+            // ── پاک‌سازی نام قدیمی ───────────────────────────────────────
+            // نسخه‌ی اول این رویه‌ها با پیشوند SP_ ساخته می‌شد. آن پیشوند در
+            // SQL Server رزرو شده است: هر نامی که با sp_ شروع شود اول در
+            // master جست‌وجو می‌شود، نه در دیتابیس جاری. نتیجه‌اش دو مشکل بود:
+            // اگر نسخه‌ای از همان نام در master وجود داشت، ساختِ رویه در
+            // دیتابیس کاربر با خطای «Invalid object name» شکست می‌خورد، و در
+            // زمان اجرا هم EXEC می‌توانست نسخه‌ی master را صدا بزند. پس نام
+            // بدون پیشوند شد و نسخه‌ی قدیمی اگر مانده باشد حذف می‌شود.
+            @"IF OBJECT_ID(N'[dbo].[SP_SYS_AUDIT_PURGE]',    N'P') IS NOT NULL
+                  DROP PROCEDURE [dbo].[SP_SYS_AUDIT_PURGE];
+              IF OBJECT_ID(N'[dbo].[SP_SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
+                  DROP PROCEDURE [dbo].[SP_SYS_AUDIT_BACKFILL];",
+
+            @"CREATE OR ALTER PROCEDURE [dbo].[SYS_AUDIT_PURGE]
                   @KeepDaysNavigation INT = 90,
                   @KeepDaysOther      INT = 1825,
                   @ChunkSize          INT = 5000
@@ -253,7 +266,7 @@ namespace ScriptSqly.Migrations
             // DATE_S/TIME_S برای ردیف‌های قدیمی NULL می‌ماند چون تبدیل شمسی
             // داخل T-SQL قابل اتکا نیست؛ فیلتر تاریخ در گزارش روی AT_SERVER
             // است و برای این ردیف‌ها هم درست کار می‌کند.
-            @"CREATE OR ALTER PROCEDURE [dbo].[SP_SYS_AUDIT_BACKFILL]
+            @"CREATE OR ALTER PROCEDURE [dbo].[SYS_AUDIT_BACKFILL]
               AS
               BEGIN
                   SET NOCOUNT ON;

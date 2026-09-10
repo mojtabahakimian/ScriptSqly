@@ -106,8 +106,8 @@ namespace ScriptSqly.Migrations
                   [TIME_S]      INT              NULL,
                   [CATEGORY]    TINYINT          NOT NULL,
                   [SEVERITY]    TINYINT          NOT NULL CONSTRAINT [DF_SYS_AUDIT_EVENT_SEV] DEFAULT (1),
-                  [ACTION]      VARCHAR(24)      NOT NULL,
-                  [ENTITY]      NVARCHAR(48)     NULL,
+                  [ACTION]      VARCHAR(32)      NOT NULL,
+                  [ENTITY]      NVARCHAR(100)    NULL,
                   [ENTITY_KEY]  NVARCHAR(80)     NULL,
                   [FORM_NAME]   VARCHAR(64)      NULL,
                   [TITLE]       NVARCHAR(250)    NULL,
@@ -118,6 +118,23 @@ namespace ScriptSqly.Migrations
                   [CORR_ID]     UNIQUEIDENTIFIER NULL,
                   CONSTRAINT [PK_SYS_AUDIT_EVENT] PRIMARY KEY CLUSTERED ([LOG_ID])
               )",
+
+            // ── گشاد کردن ستون‌ها روی نصب‌های قبلی ──────────────────────
+            // اندازه‌گیری روی دیتابیس واقعی نشان داد ActionType تا ۳۲ و
+            // TableName تا ۵۵ نویسه مقدار دارد (مثل
+            // «MOADIAN SEND BUTTON CALLED IN F4» و برچسب‌های فارسی بلند).
+            // با عرض قبلی (۲۴ و ۴۸) هم انتقال سابقه‌ی قدیمی بریده می‌شد و هم
+            // رویدادهای تازه‌ی شیم AuditLogger — که مسخره بود، چون جدول قدیمیِ
+            // USER_AUDIT_LOG خودش NVARCHAR(100) نگه می‌داشت.
+            @"IF EXISTS (SELECT 1 FROM sys.columns
+                          WHERE object_id = OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]')
+                            AND name = N'ACTION' AND max_length < 32)
+                  ALTER TABLE [dbo].[SYS_AUDIT_EVENT] ALTER COLUMN [ACTION] VARCHAR(32) NOT NULL;",
+
+            @"IF EXISTS (SELECT 1 FROM sys.columns
+                          WHERE object_id = OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]')
+                            AND name = N'ENTITY' AND max_length < 200)
+                  ALTER TABLE [dbo].[SYS_AUDIT_EVENT] ALTER COLUMN [ENTITY] NVARCHAR(100) NULL;",
 
             // ── ایندکس‌ها ────────────────────────────────────────────────
             // «این کاربر چه کرد؟» — پوشا، تا خواندن اصلاً به جدول نرسد.
@@ -272,44 +289,94 @@ namespace ScriptSqly.Migrations
                   SET NOCOUNT ON;
 
                   IF OBJECT_ID(N'[dbo].[AMALIAT]', N'U') IS NOT NULL
+                     -- نشانه‌ی «قبلاً منتقل شده»: سطرهای منتقل‌شده SEQ ندارند.
+                     -- رویداد زنده همیشه SEQ دارد، پس این نشانه با داده‌ی واقعی
+                     -- اشتباه نمی‌شود. گارد قبلی روی ACTION بود و اگر رویداد
+                     -- زنده‌ای با همان ACTION و نشستِ خالی وجود داشت، انتقال
+                     -- کلاً انجام نمی‌شد.
                      AND NOT EXISTS (SELECT 1 FROM [dbo].[SYS_AUDIT_EVENT]
-                                     WHERE [ACTION] = 'OPEN_FORM' AND [SESSION_ID] IS NULL)
+                                     WHERE [SEQ] IS NULL AND [SESSION_ID] IS NULL
+                                       AND [CATEGORY] = 1)
                   BEGIN
-                      INSERT INTO [dbo].[SYS_AUDIT_EVENT]
-                          ([SESSION_ID], [SEQ], [USER_ID], [USER_NAME], [AT_CLIENT], [AT_SERVER],
-                           [CATEGORY], [SEVERITY], [ACTION], [FORM_NAME], [TITLE])
-                      SELECT NULL, NULL,
-                             TRY_CAST(a.[USERID] AS INT),
-                             LEFT(a.[USERNAME], 50),
-                             a.[ADATE],
-                             ISNULL(a.[ADATE], SYSDATETIME()),
-                             1, 1, 'OPEN_FORM',
-                             LEFT(a.[AMALID], 64),
-                             N'باز کردن فرم ' + ISNULL(a.[AMALID], N'')
-                      FROM [dbo].[AMALIAT] AS a;
+                      -- تکه‌تکه و نه یکجا.
+                      --
+                      -- روی یک نصب واقعی این جدول ۱٬۰۹۱٬۸۵۶ ردیف داشت. یک
+                      -- INSERT ... SELECT برای این حجم، لاگ تراکنش را باد
+                      -- می‌کند و جدول را مدت طولانی قفل نگه می‌دارد. همان
+                      -- الگوی تکه‌تکه‌ی SYS_AUDIT_PURGE اینجا هم استفاده
+                      -- می‌شود تا هر تکه تراکنش کوتاه خودش را داشته باشد.
+                      DECLARE @done INT = 0, @take INT = 20000;
+
+                      WHILE 1 = 1
+                      BEGIN
+                          INSERT INTO [dbo].[SYS_AUDIT_EVENT]
+                              ([SESSION_ID], [SEQ], [USER_ID], [USER_NAME], [AT_CLIENT], [AT_SERVER],
+                               [CATEGORY], [SEVERITY], [ACTION], [FORM_NAME], [TITLE])
+                          -- AT_SERVER ستون NOT NULL است و ADATE در جدول قدیمیِ
+                          -- AMALIAT می‌تواند NULL باشد؛ بدون ISNULL کل انتقال با
+                          -- خطای NOT NULL شکست می‌خورد.
+                          SELECT NULL, NULL,
+                                 TRY_CAST(a.[USERID] AS INT),
+                                 LEFT(a.[USERNAME], 50),
+                                 a.[ADATE],
+                                 ISNULL(a.[ADATE], SYSDATETIME()),
+                                 1, 1, 'OPEN_FORM',
+                                 LEFT(a.[AMALID], 64),
+                                 N'باز کردن فرم ' + ISNULL(a.[AMALID], N'')
+                          FROM (SELECT * FROM [dbo].[AMALIAT]
+                                 ORDER BY (SELECT NULL)
+                                 OFFSET @done ROWS FETCH NEXT @take ROWS ONLY) AS a;
+
+                          IF @@ROWCOUNT = 0 BREAK;
+                          SET @done = @done + @take;
+                      END
                   END
 
+                  -- گارد «قبلاً منتقل شده»: سطرهای منتقل‌شده SEQ ندارند و
+                  -- رویداد زنده همیشه SEQ دارد، پس با داده‌ی واقعی اشتباه
+                  -- نمی‌شود. گارد قبلی ACTION = 'DELETE' را می‌دید، در حالی
+                  -- که ACTION این سطرها از ActionType جدول قدیمی می‌آید و هر
+                  -- مقداری می‌تواند باشد؛ اگر جدول قدیمی هیچ DELETEای نداشت،
+                  -- هر اجرای دوباره کل جدول را از نو درج می‌کرد.
                   IF OBJECT_ID(N'[dbo].[USER_AUDIT_LOG]', N'U') IS NOT NULL
                      AND NOT EXISTS (SELECT 1 FROM [dbo].[SYS_AUDIT_EVENT]
-                                     WHERE [ACTION] = 'DELETE' AND [SESSION_ID] IS NULL)
+                                     WHERE [SEQ] IS NULL AND [SESSION_ID] IS NULL
+                                       AND [CATEGORY] = 2)
                   BEGIN
-                      INSERT INTO [dbo].[SYS_AUDIT_EVENT]
-                          ([SESSION_ID], [SEQ], [USER_NAME], [AT_CLIENT], [AT_SERVER],
-                           [CATEGORY], [SEVERITY], [ACTION],
-                           [ENTITY], [ENTITY_KEY], [TITLE], [DETAIL], [IS_SUCCESS], [ERR_MSG])
-                      SELECT NULL, NULL,
-                             LEFT(u.[UserName], 50),
-                             u.[ActionDateTime],
-                             ISNULL(u.[ActionDateTime], SYSDATETIME()),
-                             2, 3,
-                             LEFT(u.[ActionType], 24),
-                             LEFT(u.[TableName], 48),
-                             LEFT(u.[RecordID], 80),
-                             LEFT(ISNULL(u.[ActionType], N'') + N' — ' + ISNULL(u.[TableName], N'') + N' ' + ISNULL(u.[RecordID], N''), 250),
-                             u.[AdditionalInfo],
-                             u.[IsSuccess],
-                             LEFT(u.[ErrorMessage], 400)
-                      FROM [dbo].[USER_AUDIT_LOG] AS u;
+                      -- عمداً پویا اجرا می‌شود.
+                      --
+                      -- رزولوشن نامِ ستون‌های یک جدولِ موجود در CREATE PROCEDURE
+                      -- به تعویق نمی‌افتد. یعنی اگر USER_AUDIT_LOG در یک نصب
+                      -- حتی یک ستون کم داشته باشد، ساختِ کل این رویه شکست
+                      -- می‌خورد — و چون خطای مایگریشن بلعیده می‌شود، انتقال
+                      -- AMALIAT هم بی‌صدا از بین می‌رفت. با اجرای پویا، فقط
+                      -- همین بخش رد می‌شود و بقیه سالم می‌ماند.
+                      BEGIN TRY
+                          EXEC sp_executesql N'
+                              INSERT INTO [dbo].[SYS_AUDIT_EVENT]
+                                  ([SESSION_ID], [SEQ], [USER_NAME], [AT_CLIENT], [AT_SERVER],
+                                   [CATEGORY], [SEVERITY], [ACTION],
+                                   [ENTITY], [ENTITY_KEY], [TITLE], [DETAIL], [IS_SUCCESS], [ERR_MSG])
+                              SELECT NULL, NULL,
+                                     LEFT(u.[UserName], 50),
+                                     u.[ActionDateTime],
+                                     ISNULL(u.[ActionDateTime], SYSDATETIME()),
+                                     2, 3,
+                                     LEFT(u.[ActionType], 32),
+                                     LEFT(u.[TableName], 100),
+                                     LEFT(u.[RecordID], 80),
+                                     LEFT(CONCAT(u.[ActionType], N'' — '', u.[TableName], N'' '', u.[RecordID]), 250),
+                                     u.[AdditionalInfo],
+                                     -- IS_SUCCESS ستون NOT NULL است ولی در جدول
+                                     -- قدیمی می‌تواند خالی باشد؛ بدون این، کل
+                                     -- انتقال با خطای NOT NULL رد می‌شد. همان
+                                     -- الگویی که برای ADATE در AMALIAT رعایت شد.
+                                     ISNULL(u.[IsSuccess], 1),
+                                     LEFT(u.[ErrorMessage], 400)
+                              FROM [dbo].[USER_AUDIT_LOG] AS u;';
+                      END TRY
+                      BEGIN CATCH
+                      END CATCH
                   END
               END",
         };

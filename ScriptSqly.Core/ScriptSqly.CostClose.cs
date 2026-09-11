@@ -7844,6 +7844,57 @@ GO
             TryExecuteCostCloseBatch(db, gateBlocking,
                 "CC_CheckRule.IsBlocking",
                 "اسکريپت 33-gate-blocking-rules.sql را اجرا کنيد (به CC_CheckRule نياز دارد).");
+
+            // --- 34-run-heartbeat.sql ---
+            string runHeartbeat = @"
+/* ضربانِ اجرا: صف در حافظه‌ي پروسه است، پس اگر سرور وسط يک اجرا
+   ري‌استارت شود CC_Run.Status روي «در حال اجرا» مي‌ماند — براي هميشه.
+   StartedAtUtc نمي‌گويد هنوز زنده است؛ اين ستون مي‌گويد. */
+IF COL_LENGTH('dbo.CC_Run', 'LastHeartbeatUtc') IS NULL
+    ALTER TABLE dbo.CC_Run ADD LastHeartbeatUtc DATETIME2 NULL;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.CC_sp_ReleaseStaleRuns
+    @StaleMinutes INT = 15
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @freed TABLE (RunId INT, Silent INT);
+
+    UPDATE  r
+       SET  r.Status = 2,
+            r.Note   = LEFT(ISNULL(r.Note + N' | ', N'')
+                       + N'به‌صورت خودکار متوقف شد: '
+                       + CAST(DATEDIFF(MINUTE,
+                              ISNULL(r.LastHeartbeatUtc, r.StartedAtUtc),
+                              SYSUTCDATETIME()) AS NVARCHAR(10))
+                       + N' دقيقه بي‌ضربان (سرور احتمالاً ري‌استارت شده).', 500)
+    OUTPUT  inserted.RunId,
+            DATEDIFF(MINUTE, ISNULL(deleted.LastHeartbeatUtc, deleted.StartedAtUtc),
+                     SYSUTCDATETIME())
+    INTO    @freed
+    FROM    dbo.CC_Run r
+    WHERE   r.Status = 1
+      AND   DATEDIFF(MINUTE,
+                     ISNULL(r.LastHeartbeatUtc, r.StartedAtUtc),
+                     SYSUTCDATETIME()) >= @StaleMinutes;
+
+    INSERT  dbo.CC_RunLog (RunId, StepCode, Severity, Message)
+    SELECT  f.RunId, NULL, 2,
+            CONCAT(N'اجرا ', f.Silent, N' دقيقه هيچ نشانه‌ي حياتي نداشت و ',
+                   N'به «متوقف‌شده» تغيير کرد. با «ادامه اجرا» مي‌توانيد ادامه دهيد.')
+    FROM    @freed f;
+
+    SELECT RunId, Silent AS SilentMinutes FROM @freed;
+END
+GO
+
+PRINT N'ضربانِ اجرا و CC_sp_ReleaseStaleRuns آماده شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, runHeartbeat,
+                "CC_Run.LastHeartbeatUtc و CC_sp_ReleaseStaleRuns",
+                "اسکريپت 34-run-heartbeat.sql را اجرا کنيد (به CC_Run نياز دارد).");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

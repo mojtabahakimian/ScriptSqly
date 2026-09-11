@@ -162,6 +162,15 @@ GO
 IF COL_LENGTH('dbo.CC_Exception','RuleCode') IS NULL
     ALTER TABLE dbo.CC_Exception ADD RuleCode VARCHAR(12) NULL;
 GO
+/* S05 موقع ساختِ CHK-02 مي‌داند مغايرت از نوعِ افتتاحيه است يا نه
+   (CTEهاي MissingOpening/ExtraOpening). تا امروز اين فقط داخلِ متنِ
+   Description مي‌نشست و صفحه‌ي مغايرت‌ها مجبور بود از نو حدس بزند.
+   ⚠️ بدون اين ستون، کوئريِ GetExceptions با «Invalid column name»
+   مي‌افتد و فهرستِ مغايرت‌ها اصلاً باز نمي‌شود. */
+IF COL_LENGTH('dbo.CC_Exception','OpeningKind') IS NULL
+    ALTER TABLE dbo.CC_Exception ADD OpeningKind TINYINT NULL;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_CC_Exception_Run')
     CREATE INDEX IX_CC_Exception_Run
         ON dbo.CC_Exception(RunId, StepCode, IsResolved, Severity);

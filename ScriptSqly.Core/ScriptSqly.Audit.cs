@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
@@ -30,13 +30,33 @@ namespace ScriptSqly.Migrations
             {
                 // مسیر سریع: اگر ساختار از قبل کامل است، با یک رفت‌وبرگشت
                 // برگرد. این متد در هر لاگین اجرا می‌شود و نباید هر بار
-                // سیزده دستور DDL بفرستد.
+                // شانزده دستور DDL بفرستد.
+                //
+                // عرض ستون‌ها هم بررسی می‌شود، نه فقط وجود اشیاء.
+                //
+                // چرا: نصبی که با نسخه‌ی قبلیِ همین ماژول ساخته شده،
+                // ACTION(24) و ENTITY(48) دارد. گارد قبلی فقط وجود اشیاء را
+                // می‌دید، پس روی چنین نصبی «همه چیز هست» نتیجه می‌گرفت و
+                // زودتر برمی‌گشت — یعنی دستورهای ALTER که ستون‌ها را گشاد
+                // می‌کنند **هرگز اجرا نمی‌شدند** و ستون‌ها برای همیشه باریک
+                // می‌ماندند، پس داده‌ی واقعی بریده می‌شد.
+                //
+                // این روی دیتابیس واقعی مشاهده شد، نه فرضی بود: جدول‌ها از
+                // یک بیلد قدیمی‌تر با ستون باریک ساخته شده بودند و نسخه‌ی
+                // اصلاح‌شده هم نمی‌توانست گشادشان کند.
+                //
+                // هزینه‌اش صفر است: همان یک رفت‌وبرگشت، فقط یک NOT EXISTS
+                // روی sys.columns اضافه شده.
                 var ready = db.ExecuteScalar<int>(
                     @"SELECT CASE WHEN OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]',   N'U')  IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[SYS_AUDIT_SESSION]', N'U')  IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[VW_SYS_AUDIT_TIMELINE]', N'V') IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[SYS_AUDIT_PURGE]', N'P')    IS NOT NULL
                                    AND OBJECT_ID(N'[dbo].[SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
+                                   AND NOT EXISTS (SELECT 1 FROM sys.columns
+                                                    WHERE object_id = OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]')
+                                                      AND ((name = N'ACTION' AND max_length < 32)
+                                                        OR (name = N'ENTITY' AND max_length < 200)))
                                   THEN 1 ELSE 0 END");
 
                 if (ready == 1) return;

@@ -7114,6 +7114,13 @@ BEGIN
     SELECT  @NewFnumb = ISNULL(MAX(FNUMB), 0) + 1
     FROM    dbo.HEAD_MANF WITH (UPDLOCK, HOLDLOCK);
 
+    -- نامِ ماهِ مقصد. CHOOSE با ايندکس ۱ شروع مي‌شود، پس @Month مستقيماً
+    -- مي‌نشيند. اگر مقدارِ بيرون از ۱..۱۲ بيايد NULL برمي‌گردد و TOZIH
+    -- خالي مي‌ماند — بهتر از نوشتنِ نامِ ماهِ اشتباه.
+    DECLARE @MonthName NVARCHAR(20) = CHOOSE(@Month,
+        N'فروردین', N'اردیبهشت', N'خرداد', N'تیر', N'مرداد', N'شهریور',
+        N'مهر', N'آبان', N'آذر', N'دی', N'بهمن', N'اسفند');
+
     ---- سربرگ فرمول
     -- DATE_ACTIV روی اولین روزِ همین دوره می‌نشیند تا فرمول از ابتدای ماه
     -- معتبر باشد؛ اگر تاریخِ مبدأ کپی شود، فرمول «از آینده» یا «از سالِ
@@ -7123,9 +7130,13 @@ BEGIN
          NAMES, N_KOL, NUMBER, TNUMBER, SA_HOUR, SA_NHOU, TOZIH, CRT, UID)
     SELECT  @NewFnumb, hm.CODE, @DT1, hm.IMBIBE_MANF, hm.IMBIBE_SAR, @Month,
             hm.NAMES, hm.N_KOL, hm.NUMBER, hm.TNUMBER, hm.SA_HOUR, hm.SA_NHOU,
-            LEFT(ISNULL(hm.TOZIH, N'') +
-                 N' [کپی از فرمول ' + CAST(@SourceFnumb AS NVARCHAR(20)) +
-                 N' ماه ' + CAST(CAST(hm.GHEYMAT AS INT) AS NVARCHAR(2)) + N']', 500),
+            -- توضیحات فقط نامِ ماهِ *مقصد*. قبلاً توضیحِ فرمولِ مبدأ به
+            -- اضافه‌ی «[کپی از فرمول ۱۲۳ ماه ۴]» نوشته می‌شد؛ روی کالایی
+            -- که چند بار کپی می‌شد این رشته هر بار درازتر و ناخواناتر
+            -- می‌شد و ماهِ نوشته‌شده هم ماهِ مبدأ بود نه ماهی که فرمول
+            -- برایش ساخته شده — یعنی دقیقاً برعکسِ چیزی که خواننده
+            -- می‌خواهد بداند.
+            @MonthName,
             GETDATE(), NULL
     FROM    dbo.HEAD_MANF hm
     WHERE   hm.FNUMB = @SourceFnumb;

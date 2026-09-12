@@ -2193,6 +2193,32 @@ BEGIN
        (tartib=11) بیاید، ولی این دو به‌عنوان متن با هم می‌آمیزند. با
        گزارش واقعی کارت کالا تأیید شد که فقط tartib ترتیب درست را می‌دهد.
 
+       ⚠️ هشتمین اصلاح — چیزی که آن اصلاح چهارم فرض گرفته بود و همه‌جا
+       درست نبود: TAGCOD.tartib داده‌ی پایه‌ی هر شرکت است، نه چیزی که
+       ScriptSqly بسازد. روی شرکتِ «پودر مروارید» (newpoodr1405) این ستون
+       برای *همه‌ی* انواع برگه NULL است. آن‌وقت ISNULL(...,0) همه را
+       هم‌رتبه می‌کند و ترتیب می‌افتد روی NUMBER — یعنی دقیقاً همان چیزی
+       که چند خط بالاتر خودمان نوشته‌ایم قابل اتکا نیست، چون هر نوع برگه
+       شماره‌گذاری مستقل دارد.
+
+       نتیجه‌ی واقعی روی کد ۹۵۶ (شیر اسکیم)، انبار ۷، ۱۴۰۵/۰۱/۰۱:
+       حواله خروج شماره ۱ قبل از انتقالی-ورود شماره ۲ پردازش می‌شد و
+       مانده را −۳۱٬۶۲۵ نشان می‌داد، در حالی که کارت کالای واقعی همان روز
+       ۰ است.
+
+       راه‌حل: BARGAH به‌عنوان کلیدِ *بعد از* tartib اضافه شد — نه به‌جای
+       آن. اگر شرکتی tartib داشته باشد، هیچ چیز عوض نمی‌شود (کلید سوم فقط
+       ردیف‌های هم‌رتبه را مرتب می‌کند). اگر نداشته باشد، همان ترتیبی
+       حاکم می‌شود که dbo.KA_KH و dbo.MOGHA_ANBAR — یعنی خودِ گزارش‌های
+       مرجع — استفاده می‌کنند.
+
+       ⚠️ BARGAH عمداً LTRIM نمی‌شود. فاصله‌های ابتدایی همان مکانیزمِ
+       ترتیبِ سیستم قدیمی‌اند: «‏ انتقالی - ورود» یک فاصله دارد و
+       «حواله خروج» صفر، پس ورود جلو می‌افتد. با LTRIM این نشانه پاک
+       می‌شود و «اضافه انبار» اولِ روز می‌آمد — که روی همین کالا یک
+       منفیِ کاذبِ ۲۰۴− می‌ساخت.
+
+
        فقط اولین نقطه منفی هر کالا/انبار در همین دوره گزارش می‌شود؛
        بقیه دنباله همان یک مشکل‌اند و فهرست را شلوغ می‌کنند.
 
@@ -2368,22 +2394,25 @@ BEGIN
     AllMovement AS (
         SELECT  o.Anbar, o.code, CAST(0 AS BIGINT) AS DATE_N, CAST(0 AS FLOAT) AS NUMBER,
                 CAST(NULL AS FLOAT) AS TAG, CAST(0 AS INT) AS Tartib,
+                CAST(N'' AS NVARCHAR(100)) AS Bargah,
                 CAST(o.OpeningBalance AS DECIMAL(18,6)) AS Meghdar
         FROM    Opening o
         WHERE   EXISTS (SELECT 1 FROM #PM p WHERE p.Anbar = o.Anbar AND p.code = o.code)
 
         UNION ALL
         SELECT  p.Anbar, p.code, p.DATE_N, p.NUMBER, p.TAG,
-                ISNULL(tc.tartib, 0) AS Tartib, p.Meghdar
+                ISNULL(tc.tartib, 0) AS Tartib,
+                CAST(ISNULL(tc.BARGAH, N'') AS NVARCHAR(100)) AS Bargah,
+                p.Meghdar
         FROM    #PM p
         LEFT    JOIN dbo.TAGCOD tc ON tc.CODE = p.TAG
         WHERE   p.Anbar IS NOT NULL AND p.code IS NOT NULL
     ),
     Tajamoi AS (
-        SELECT  Anbar, code, DATE_N, NUMBER, TAG, Tartib,
+        SELECT  Anbar, code, DATE_N, NUMBER, TAG, Tartib, Bargah,
                 SUM(Meghdar) OVER (
                     PARTITION BY Anbar, code
-                    ORDER BY DATE_N, Tartib, NUMBER
+                    ORDER BY DATE_N, Tartib, Bargah, NUMBER
                     ROWS UNBOUNDED PRECEDING) AS Mande
         FROM    AllMovement
     ),
@@ -2392,7 +2421,7 @@ BEGIN
                 ISNULL(n.Nerkh, 0) AS Nerkh,
                 ROW_NUMBER() OVER (
                     PARTITION BY t.Anbar, t.code
-                    ORDER BY t.DATE_N, t.Tartib, t.NUMBER) AS rn
+                    ORDER BY t.DATE_N, t.Tartib, t.Bargah, t.NUMBER) AS rn
         FROM    Tajamoi t
         LEFT    JOIN #Nerkh n ON n.Anbar = t.Anbar AND n.code = t.code
         WHERE   t.Mande < @Chk01QtyFloor
@@ -2586,7 +2615,7 @@ BEGIN
             -- عیناً dbo.MOGHA_ANBAR.lastav_base: AVRAGE برای TAG۱/۷/۹/۲۴
             -- (ورود مستقیم)، AVRAGE2 برای TAG=۵ مقصد (ورود از انتقالی).
             SELECT  il.ANBAR AS Anbar, TRY_CAST(il.CODE AS BIGINT) AS code, il.AVRAGE AS Rate,
-                    hl.DATE_N, t.tartib, il.NUMBER, il.ID
+                    hl.DATE_N, t.tartib, t.BARGAH, il.NUMBER, il.ID
             FROM    dbo.INVO_LST il
             JOIN    dbo.HEAD_LST hl ON il.NUMBER = hl.NUMBER AND il.TAG = hl.TAG
             JOIN    dbo.TAGCOD t ON il.TAG = t.CODE
@@ -2596,7 +2625,7 @@ BEGIN
 
             UNION ALL
             SELECT  CAST(il.ANBARF AS INT), TRY_CAST(il.CODE AS BIGINT), il.AVRAGE2,
-                    hl.DATE_N, t.tartib, il.NUMBER, il.ID
+                    hl.DATE_N, t.tartib, t.BARGAH, il.NUMBER, il.ID
             FROM    dbo.INVO_LST il
             JOIN    dbo.HEAD_LST hl ON il.NUMBER = hl.NUMBER AND il.TAG = hl.TAG
             JOIN    dbo.TAGCOD t ON il.TAG = t.CODE
@@ -2628,7 +2657,8 @@ BEGIN
         LastAvgRanked AS (
             SELECT  Anbar, code, Rate,
                     ROW_NUMBER() OVER (PARTITION BY Anbar, code
-                                        ORDER BY DATE_N DESC, tartib DESC, NUMBER DESC, ID DESC) AS rn
+                                        ORDER BY DATE_N DESC, tartib DESC, BARGAH DESC,
+                                                 NUMBER DESC, ID DESC) AS rn
             FROM    LastAvgSource
         ),
         KartAnbar AS (

@@ -502,8 +502,8 @@ USING (VALUES
  ('CHK-15', N'فرمول با مقدار منفی', 'S00', 17, 2, NULL,
   N'مقدار منفی در یک سطر فرمول قابل قبول نیست و باعث می‌شود مانده حساب کالای در جریان ساخت (۷۵۱) هرگز متوازن نشود. با دکمه اصلاح، آن سطر را صفر یا حذف کنید.', 75),
 
- ('CHK-16', N'برگه تولید به انباری که نقش «محصول» ندارد', 'S00', 18, 1, NULL,
-  N'در تنظیمات ← واحدهای تولیدی، این انبار را با نقش «محصول» به واحد مربوطه بدهید. اگر انبار از قبل در واحد هست ولی نقشش «سایر» یا «مواد اولیه» است، همان ردیف را ویرایش و نقش را «محصول» کنید. وگرنه هزینه تبدیل این برگه‌ها در هیچ واحدی جذب نمی‌شود و مانده حساب ۷۵۱ کاذب می‌شود.', 45),
+ ('CHK-16', N'برگه تولید به انبار بدون واحد تعریف‌شده', 'S00', 18, 1, NULL,
+  N'در تنظیمات ← واحدهای تولیدی، این انبار را به واحد مربوطه اضافه کنید. نقشش هر چه باشد مهم نیست — چون برگه تولید به آن می‌خورد، خودش به‌عنوان انبار محصولِ همان واحد شناخته می‌شود. ولی تا وقتی به هیچ واحدی وصل نباشد، معلوم نیست این تولید کار کدام واحد بوده و هزینه تبدیلش در هیچ واحدی جذب نمی‌شود و مانده حساب ۷۵۱ کاذب می‌ماند.', 45),
 
  ('CHK-17', N'شمارش دوم/سوم انبارگردانی بدون مغایرت شمارش اول', 'S00', 19, 2, NULL,
   N'شمارش اول این کالا با موجودی سیستم برابر بوده، پس نباید وارد شمارش دوم/سوم می‌شد. ستون NUM2/NUM3 را که اشتباه پر شده صفر کنید — این عدد مستقیم مقدار پایان‌دوره‌ی کالا را در موتور نرخ غلط می‌کند.', 46),
@@ -993,66 +993,34 @@ BEGIN
     JOIN    dbo.HEAD_MANF h ON h.FNUMB = d.FNUMB AND h.GHEYMAT = @Month
     WHERE   d.MEGH < 0 OR d.MEGHk < 0;
 
-    ---- CHK-16 : برگه تولید به انباري که نقش «محصول» ندارد — بدون اين
-    -- تشخيص، S10 اين برگه‌ها را در محاسبه جذب هيچ واحدي نمي‌بيند و مانده
-    -- حساب ۷۵۱ کاذب مي‌شود (دقيقاً همان چيزي که روي انبار ۱۵ رخ داد).
+    ---- CHK-16 : برگه تولید به انباري که به هيچ واحد توليدي وصل نيست.
+    -- بدون اين تشخيص، S10 اين برگه‌ها را در جذب هيچ واحدي نمي‌بيند و
+    -- مانده حساب ۷۵۱ کاذب مي‌شود (همان چيزي که روي انبار ۱۵ رخ داد).
     --
-    -- ⚠️ دو حالتِ کاملاً متفاوت که قبلاً هر دو يک پيام مي‌گرفتند، و پيام
-    -- براي حالت دوم صريحاً غلط بود («به هيچ واحدي وصل نيست» در حالي که
-    -- وصل بود):
+    -- ⚠️ قبلاً نقشِ «محصول» هم شرط بود، و انباري که در واحد بود ولي نقشش
+    -- «ساير» بود اينجا گزارش مي‌شد. تصميم صاحب پروژه: نقش را از خودِ
+    -- برگه‌ي توليد بخوان، نه از تنظيمات — اگر محصول در اين انبار
+    -- مي‌نشيند، انبارِ محصول است. آن استنتاج حالا در نماي
+    -- CC_vw_UnitProductAnbar است (فايل ۳۵) و موتور نرخ هم از همان
+    -- مي‌خواند، پس اين قاعده ديگر بابتش هشدار نمي‌دهد.
     --
-    --   الف) انبار در هيچ واحدي نيست. اينجا واقعاً نمي‌شود فهميد اين
-    --        توليد کارِ کدام واحد بوده — خودِ برگه فقط انبار را مي‌گويد،
-    --        نه واحد را. نگاشتِ انبار⇄واحد جاي ديگري وجود ندارد، پس
-    --        حدس زدنش از روي برگه ممکن نيست و بايد تعريف شود.
-    --
-    --   ب) انبار در واحدي هست ولي نقشش «محصول» نيست. اينجا واحد معلوم
-    --        است و فقط نقش اشتباه تنظيم شده. پيام بايد اسم همان واحد و
-    --        نقش فعلي را بگويد تا کاربر بداند دقيقاً کجا را عوض کند.
-    --
-    -- به همين دليل نقشِ تنظيمات ملاک است و نه صرفاً «در برگه‌ي توليد
-    -- ديده شده»: ديده‌شدن در برگه مي‌گويد محصول کجا رفته، ولي نمي‌گويد
-    -- کدام واحد ساخته‌اش — و جذب هزينه‌ي تبديل دقيقاً به همين دومي
-    -- نياز دارد.
-    ;WITH Prod AS (
-        SELECT DISTINCT pl.ANBAR, pl.CODE, h.NUMBER, h.DATE_N
-        FROM   dbo.HEAD_LST h
-        JOIN   dbo.INVO_LST pl ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
-        WHERE  h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
-          AND  pl.ANBAR IS NOT NULL
-          AND  NOT EXISTS (SELECT 1 FROM dbo.CC_UnitAnbar ua
-                            JOIN dbo.CC_Unit u ON u.UnitId = ua.UnitId
-                            WHERE ua.Anbar = pl.ANBAR AND ua.AnbarRole = 3 AND u.IsActive = 1)
-    ),
-    /* اگر انبار در چند واحد باشد، يکي را براي پيام برمي‌داريم — کاربر
-       با ديدن همان يکي، بقيه را هم پيدا مي‌کند. */
-    Owner AS (
-        SELECT p.ANBAR,
-               u.UnitName,
-               ua.AnbarRole,
-               rn = ROW_NUMBER() OVER (PARTITION BY p.ANBAR ORDER BY ua.UnitId)
-        FROM   Prod p
-        JOIN   dbo.CC_UnitAnbar ua ON ua.Anbar = p.ANBAR
-        JOIN   dbo.CC_Unit u ON u.UnitId = ua.UnitId AND u.IsActive = 1
-    )
+    -- آنچه مي‌ماند همان يک حالتي است که واقعاً قابل حل نيست: انباري که
+    -- در هيچ واحدي نيست. برگه فقط انبار را ثبت مي‌کند نه واحد را، و
+    -- نگاشتِ انبار⇄واحد جاي ديگري وجود ندارد؛ پس واحدش قابل حدس زدن
+    -- نيست و بايد در تنظيمات تعريف شود.
     INSERT dbo.CC_Exception
         (RunId, StepCode, RuleCode, ExType, Severity, Code, Anbar, DocNumber, DocDate, Description)
-    SELECT @RunId, 'S00', 'CHK-16', 18, 1,
-           TRY_CAST(p.CODE AS BIGINT), p.ANBAR, p.NUMBER, p.DATE_N,
-           CASE WHEN o.UnitName IS NULL
-                THEN CONCAT(N'برگه تولید شماره ', p.NUMBER, N' به انبار ', p.ANBAR,
-                            N' وارد شده، ولی این انبار به هیچ واحد تولیدی وصل نیست')
-                ELSE CONCAT(N'برگه تولید شماره ', p.NUMBER, N' به انبار ', p.ANBAR,
-                            N' وارد شده؛ این انبار در واحد «', o.UnitName,
-                            N'» هست ولی نقشش «',
-                            CASE o.AnbarRole WHEN 1 THEN N'مبنای انحراف'
-                                             WHEN 2 THEN N'مواد اولیه'
-                                             WHEN 4 THEN N'سایر'
-                                             ELSE N'نامشخص' END,
-                            N'» است، نه «محصول»')
-           END
-    FROM   Prod p
-    LEFT   JOIN Owner o ON o.ANBAR = p.ANBAR AND o.rn = 1;
+    SELECT DISTINCT @RunId, 'S00', 'CHK-16', 18, 1,
+           TRY_CAST(pl.CODE AS BIGINT), pl.ANBAR, h.NUMBER, h.DATE_N,
+           CONCAT(N'برگه تولید شماره ', h.NUMBER, N' به انبار ', pl.ANBAR,
+                  N' وارد شده، ولی این انبار به هیچ واحد تولیدی وصل نیست')
+    FROM   dbo.HEAD_LST h
+    JOIN   dbo.INVO_LST pl ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
+    WHERE  h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
+      AND  pl.ANBAR IS NOT NULL
+      AND  NOT EXISTS (SELECT 1 FROM dbo.CC_UnitAnbar ua
+                        JOIN dbo.CC_Unit u ON u.UnitId = ua.UnitId
+                        WHERE ua.Anbar = pl.ANBAR AND u.IsActive = 1);
 
     ---- CHK-17 : شمارش دوم/سوم انبارگردانی بدون مغایرت شمارش اول
     -- طبق فرآیند واقعی انبارگردانی (تأیید کاربر): کالایی که شمارش اول
@@ -2809,6 +2777,65 @@ GO
                 "CC_sp_S05_Gate",
                 "اسکریپت‌های 10-schema.sql تا 13-chk04-and-autofix.sql را اول اجرا کنید.");
 
+            // --- 35-product-anbar-derived.sql ---
+            // عمداً پيش از موتور نرخ: رويه‌هاي آن به اين نما ارجاع مي‌دهند.
+            // (SQL Server نامِ نما را موقع ساختِ رويه حل نمي‌کند، ولي
+            //  ترتيبِ درست، خطاي زمانِ اجرا را هم منتفي مي‌کند.)
+            string productAnbarView = @"
+/* ═══════════════════════════════════════════════════════════════════
+   انبار «محصول» — از واقعیت، نه فقط از تنظیمات
+
+   تا اینجا «انبار محصولِ یک واحد» فقط یعنی ردیفی در CC_UnitAnbar با
+   AnbarRole = 3. اگر کاربر انبار را به واحد وصل می‌کرد ولی نقشش را
+   «سایر» می‌گذاشت، برگه‌های تولیدی که به همان انبار می‌رفتند در جذب
+   هزینه‌ی تبدیل هیچ واحدی دیده نمی‌شدند و مانده‌ی ۷۵۱ کاذب می‌شد.
+
+   تصمیم (تأیید صاحب پروژه): اتصالِ انبار⇄واحد از تنظیمات بیاید — چون
+   جای دیگری وجود ندارد و از روی برگه قابل استنتاج نیست — ولی اینکه
+   «آیا محصول اینجا می‌نشیند» از خودِ برگه‌های تولید خوانده شود. اگر
+   برگه‌ی تولید محصول را در این انبار می‌ریزد، این انبارِ محصول است،
+   هرچه در تنظیمات نوشته شده باشد.
+
+   ⚠️ این تعریف کاملاً افزایشی است: هر انباری که قبلاً محصول حساب
+      می‌شد، هنوز هم می‌شود. فقط انبارهایی اضافه می‌شوند که واقعاً
+      برگه‌ی تولید می‌گیرند. پس هیچ محاسبه‌ی درستی از دست نمی‌رود.
+
+   ⚠️ IsActive عمداً اینجا فیلتر نشده. بعضی از مصرف‌کننده‌های این نما
+      قبلاً واحد غیرفعال را هم می‌دیدند و بعضی نه؛ اگر اینجا فیلتر
+      می‌کردیم، رفتار دسته‌ی اول بی‌سروصدا عوض می‌شد. هرکس که به
+      IsActive نیاز دارد، خودش CC_Unit را join می‌کند — همان‌طور که
+      قبلاً می‌کرد.
+
+   ⚠️ شواهدِ برگه بازه‌ی تاریخی ندارد: «هر وقت که بوده». اگر ماه‌به‌ماه
+      حساب می‌شد، یک انبار در ماهی محصول بود و در ماهی نه، و نرخ‌ها
+      بین دو ماه بی‌دلیل می‌پریدند.
+   ═══════════════════════════════════════════════════════════════════ */
+
+CREATE OR ALTER VIEW dbo.CC_vw_UnitProductAnbar
+AS
+    WITH ProdAnbar AS (
+        /* انبارهایی که دست‌کم یک بار برگه‌ی تولید گرفته‌اند. یک بار
+           محاسبه می‌شود و بعد به همه‌ی ردیف‌های CC_UnitAnbar وصل، نه
+           اینکه برای هر ردیف جدا اسکن شود. */
+        SELECT DISTINCT pl.ANBAR
+        FROM   dbo.HEAD_LST h
+        JOIN   dbo.INVO_LST pl ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
+        WHERE  h.TAG = 9 AND pl.ANBAR IS NOT NULL
+    )
+    SELECT  ua.UnitId,
+            ua.Anbar,
+            /* ۰ = نقشش در تنظیمات «محصول» است، ۱ = از روی برگه‌ها
+               استنتاج شده. برای گزارش و عیب‌یابی. */
+            IsDerived = CAST(CASE WHEN ua.AnbarRole = 3 THEN 0 ELSE 1 END AS BIT)
+    FROM    dbo.CC_UnitAnbar ua
+    WHERE   ua.AnbarRole = 3
+       OR   EXISTS (SELECT 1 FROM ProdAnbar p WHERE p.ANBAR = ua.Anbar);
+GO
+";
+            TryExecuteCostCloseBatch(db, productAnbarView,
+                "CC_vw_UnitProductAnbar",
+                "اسکریپت 10-schema.sql را اول اجرا کنید (به CC_UnitAnbar نیاز دارد).");
+
             // --- 15-rate-engine-production.sql ---
             string rateEngine = @"
 /* ═══════════════════════════════════════════════════════════════════
@@ -2954,7 +2981,7 @@ BEGIN
     FROM    dbo.HEAD_LST  h
     JOIN    dbo.INVO_LST  pl  ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
     JOIN    dbo.HEAD_MANF hm  ON hm.FNUMB  = TRY_CAST(pl.N_KOL AS INT) AND hm.GHEYMAT = @Month
-    JOIN    dbo.CC_UnitAnbar cua ON cua.Anbar = pl.ANBAR AND cua.AnbarRole = 3
+    JOIN    dbo.CC_vw_UnitProductAnbar cua ON cua.Anbar = pl.ANBAR
     JOIN    dbo.CC_Unit   u   ON u.UnitId  = cua.UnitId AND u.IsActive = 1
     LEFT    JOIN dbo.stuf_def_nfani nf ON nf.CODE = hm.CODE
     WHERE   h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
@@ -3068,7 +3095,7 @@ BEGIN
         FROM   dbo.HEAD_LST h
         JOIN   dbo.INVO_LST pl ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
         JOIN   dbo.HEAD_MANF hm ON hm.FNUMB = TRY_CAST(pl.N_KOL AS INT) AND hm.GHEYMAT = @Month
-        JOIN   dbo.CC_UnitAnbar cua ON cua.Anbar = pl.ANBAR AND cua.AnbarRole = 3
+        JOIN   dbo.CC_vw_UnitProductAnbar cua ON cua.Anbar = pl.ANBAR
         JOIN   dbo.CC_Unit u ON u.UnitId = cua.UnitId AND u.IsActive = 1
         WHERE  h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
     )
@@ -3211,7 +3238,9 @@ BEGIN
 
     -- تشخيص واحد از روي دپارتمان کنار گذاشته شد: دپارتمان را اپراتور دستي
     -- روي برگه مي‌زند و اشتباه تايپي رايج است. ملاک مطمئن، انباري است که
-    -- محصول توليدشده وارد آن مي‌شود (CC_UnitAnbar.AnbarRole = 3، «محصول»)
+    -- محصول توليدشده وارد آن مي‌شود — نماي CC_vw_UnitProductAnbar، که هم
+    -- نقشِ «محصول» در تنظيمات را مي‌پذيرد و هم انباري که واقعاً برگه‌ي
+    -- توليد مي‌گيرد (فايل ۳۵)
     -- — همان چيزي که در تنظيمات واحدها از قبل تعريف شده و کاربر تأييد
     -- کرد بايد ملاک باشد (نه Depatman). CHK-16 (S00) از قبل هر انباري که
     -- برگه توليد دارد ولي به هيچ واحدي وصل نيست را هشدار مي‌دهد.
@@ -3223,9 +3252,8 @@ BEGIN
     -- تعديل‌شده‌ي واحد اول دوباره ضريب مي‌زند — فرمول‌ها خراب مي‌شوند.
     IF EXISTS (
         SELECT ua.Anbar
-        FROM   dbo.CC_UnitAnbar ua
+        FROM   dbo.CC_vw_UnitProductAnbar ua
         JOIN   dbo.CC_Unit      u  ON u.UnitId = ua.UnitId AND u.IsActive = 1
-        WHERE  ua.AnbarRole = 3
         GROUP  BY ua.Anbar
         HAVING COUNT(DISTINCT ua.UnitId) > 1
     )
@@ -3262,8 +3290,8 @@ BEGIN
         JOIN    dbo.HEAD_MANF hm ON hm.FNUMB  = TRY_CAST(pl.N_KOL AS INT)
                                 AND hm.GHEYMAT = @Month
         WHERE   h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
-          AND   pl.ANBAR IN (SELECT Anbar FROM dbo.CC_UnitAnbar
-                              WHERE UnitId = @UnitId AND AnbarRole = 3)
+          AND   pl.ANBAR IN (SELECT Anbar FROM dbo.CC_vw_UnitProductAnbar
+                              WHERE UnitId = @UnitId)
           AND   NOT EXISTS (
                     SELECT 1 FROM dbo.CC_LaborAbsorptionRate fx
                     WHERE fx.UnitId = @UnitId AND fx.CODE = hm.CODE AND fx.IsFixed = 1
@@ -3310,7 +3338,7 @@ BEGIN
             SELECT  TRY_CAST(pl.CODE AS BIGINT) AS CODE, cua.UnitId, SUM(pl.MEGHK) AS Qty
             FROM    dbo.HEAD_LST h
             JOIN    dbo.INVO_LST pl      ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
-            JOIN    dbo.CC_UnitAnbar cua ON cua.Anbar  = pl.ANBAR AND cua.AnbarRole = 3
+            JOIN    dbo.CC_vw_UnitProductAnbar cua ON cua.Anbar  = pl.ANBAR
             JOIN    dbo.CC_Unit u        ON u.UnitId   = cua.UnitId AND u.IsActive = 1
             WHERE   h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
             GROUP BY TRY_CAST(pl.CODE AS BIGINT), cua.UnitId
@@ -3372,8 +3400,8 @@ BEGIN
                                 AND hm.GHEYMAT = @Month
         JOIN    dbo.CC_LaborAbsorptionRate fx ON fx.UnitId = @UnitId AND fx.CODE = hm.CODE AND fx.IsFixed = 1
         WHERE   h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
-          AND   pl.ANBAR IN (SELECT Anbar FROM dbo.CC_UnitAnbar
-                              WHERE UnitId = @UnitId AND AnbarRole = 3);
+          AND   pl.ANBAR IN (SELECT Anbar FROM dbo.CC_vw_UnitProductAnbar
+                              WHERE UnitId = @UnitId);
 
         SET @actWage = @actWage - @fixedWage;
         SET @actOh   = @actOh   - @fixedOh;
@@ -3437,7 +3465,7 @@ BEGIN
             SELECT  TRY_CAST(pl.CODE AS BIGINT) AS CODE, cua.UnitId, SUM(pl.MEGHK) AS Qty
             FROM    dbo.HEAD_LST h
             JOIN    dbo.INVO_LST pl      ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
-            JOIN    dbo.CC_UnitAnbar cua ON cua.Anbar  = pl.ANBAR AND cua.AnbarRole = 3
+            JOIN    dbo.CC_vw_UnitProductAnbar cua ON cua.Anbar  = pl.ANBAR
             JOIN    dbo.CC_Unit u        ON u.UnitId   = cua.UnitId AND u.IsActive = 1
             WHERE   h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
             GROUP BY TRY_CAST(pl.CODE AS BIGINT), cua.UnitId
@@ -3493,8 +3521,8 @@ BEGIN
                         JOIN   dbo.INVO_LST pl ON pl.NUMBER = h.NUMBER AND pl.TAG = 9
                         WHERE  h.TAG = 9 AND h.DATE_N BETWEEN @DT1 AND @DT2
                           AND  TRY_CAST(pl.N_KOL AS INT) = hm.FNUMB
-                          AND  pl.ANBAR IN (SELECT Anbar FROM dbo.CC_UnitAnbar
-                                            WHERE UnitId = @UnitId AND AnbarRole = 3))
+                          AND  pl.ANBAR IN (SELECT Anbar FROM dbo.CC_vw_UnitProductAnbar
+                                            WHERE UnitId = @UnitId))
               AND   NOT EXISTS (
                         SELECT 1 FROM dbo.CC_LaborAbsorptionRate fx
                         WHERE fx.UnitId = @UnitId AND fx.CODE = hm.CODE AND fx.IsFixed = 1

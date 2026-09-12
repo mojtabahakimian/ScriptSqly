@@ -24,7 +24,7 @@ namespace ScriptSqly.Migrations
                 // اجرا موجود باشد، نه فقط در اجراهای خاص. هزینه‌اش یک
                 // رفت‌وبرگشت است، چون AuditScript اول با یک کوئری بررسی
                 // می‌کند که همه چیز از قبل ساخته شده یا نه.
-                AuditScript(db);
+                AuditScript(db, isCustomCall);
 
                 #region SALARY
                 if (_type_ == 2) //مخصوص حقوق

@@ -24,47 +24,38 @@ namespace ScriptSqly.Migrations
         ///
         /// همه‌ی بلوک‌ها idempotent هستند و این متد در هر اجرا صدا زده می‌شود.
         /// </summary>
-        private static void AuditScript(SqlConnection db)
+        private static void AuditScript(SqlConnection db, bool isCustomCall = false)
         {
-            try
+            if (!isCustomCall)
             {
-                // مسیر سریع: اگر ساختار از قبل کامل است، با یک رفت‌وبرگشت
-                // برگرد. این متد در هر لاگین اجرا می‌شود و نباید هر بار
-                // شانزده دستور DDL بفرستد.
-                //
-                // عرض ستون‌ها هم بررسی می‌شود، نه فقط وجود اشیاء.
-                //
-                // چرا: نصبی که با نسخه‌ی قبلیِ همین ماژول ساخته شده،
-                // ACTION(24) و ENTITY(48) دارد. گارد قبلی فقط وجود اشیاء را
-                // می‌دید، پس روی چنین نصبی «همه چیز هست» نتیجه می‌گرفت و
-                // زودتر برمی‌گشت — یعنی دستورهای ALTER که ستون‌ها را گشاد
-                // می‌کنند **هرگز اجرا نمی‌شدند** و ستون‌ها برای همیشه باریک
-                // می‌ماندند، پس داده‌ی واقعی بریده می‌شد.
-                //
-                // این روی دیتابیس واقعی مشاهده شد، نه فرضی بود: جدول‌ها از
-                // یک بیلد قدیمی‌تر با ستون باریک ساخته شده بودند و نسخه‌ی
-                // اصلاح‌شده هم نمی‌توانست گشادشان کند.
-                //
-                // هزینه‌اش صفر است: همان یک رفت‌وبرگشت، فقط یک NOT EXISTS
-                // روی sys.columns اضافه شده.
-                var ready = db.ExecuteScalar<int>(
-                    @"SELECT CASE WHEN OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]',   N'U')  IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[SYS_AUDIT_SESSION]', N'U')  IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[VW_SYS_AUDIT_TIMELINE]', N'V') IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[SYS_AUDIT_PURGE]', N'P')    IS NOT NULL
-                                   AND OBJECT_ID(N'[dbo].[SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
-                                   AND NOT EXISTS (SELECT 1 FROM sys.columns
-                                                    WHERE object_id = OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]')
-                                                      AND ((name = N'ACTION' AND max_length < 32)
-                                                        OR (name = N'ENTITY' AND max_length < 200)))
-                                  THEN 1 ELSE 0 END");
+                try
+                {
+                    // مسیر سریع: اگر ساختار و بستر دسترسی‌ها از قبل کامل است، برگرد.
+                    var ready = db.ExecuteScalar<int>(
+                        @"SELECT CASE WHEN OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]',   N'U')  IS NOT NULL
+                                       AND OBJECT_ID(N'[dbo].[SYS_AUDIT_SESSION]', N'U')  IS NOT NULL
+                                       AND OBJECT_ID(N'[dbo].[VW_SYS_AUDIT_TIMELINE]', N'V') IS NOT NULL
+                                       AND OBJECT_ID(N'[dbo].[SYS_AUDIT_PURGE]', N'P')    IS NOT NULL
+                                       AND OBJECT_ID(N'[dbo].[SYS_AUDIT_BACKFILL]', N'P') IS NOT NULL
+                                       AND NOT EXISTS (SELECT 1 FROM sys.columns
+                                                        WHERE object_id = OBJECT_ID(N'[dbo].[SYS_AUDIT_EVENT]')
+                                                          AND ((name = N'ACTION' AND max_length < 32)
+                                                            OR (name = N'ENTITY' AND max_length < 200)))
+                                       AND (OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NULL
+                                            OR OBJECT_ID(N'[dbo].[SALA_DTL]', N'U') IS NULL
+                                            OR NOT EXISTS (SELECT 1 FROM [dbo].[SALA_DTL] D
+                                                           WHERE NOT EXISTS (SELECT 1 FROM [dbo].[SAL_CHEK] E
+                                                                             WHERE E.USERCO = D.IDD
+                                                                               AND E.[OBJECT] = (SELECT IDH FROM [dbo].[TFORMS] WHERE FORMNAME = N'AUDITTRAIL'))))
+                                      THEN 1 ELSE 0 END");
 
-                if (ready == 1) return;
-            }
-            catch
-            {
-                // اگر همین بررسی هم شکست خورد، ادامه بده؛ دستورهای پایین
-                // خودشان idempotent هستند.
+                    if (ready == 1) return;
+                }
+                catch
+                {
+                    // اگر همین بررسی هم شکست خورد، ادامه بده؛ دستورهای پایین
+                    // خودشان idempotent هستند.
+                }
             }
 
             foreach (var sql in AuditStatements)
@@ -199,10 +190,7 @@ namespace ScriptSqly.Migrations
               END",
 
             // ── ثبت فرم گزارش در TFORMS ─────────────────────────────────
-            // فرم مشاهده‌ی سوابق باید مجوزدار باشد، وگرنه هر کاربری فعالیت
-            // بقیه را به‌همراه IP و نام کامپیوترشان می‌بیند. اینجا فقط خودِ
-            // فرم ثبت می‌شود؛ دسترسی به هیچ‌کس داده نمی‌شود و مدیر باید آن را
-            // در SAL_CHEK به افراد مورد نظر بدهد — همان الگوی CRMALL.
+            // فرم مشاهده‌ی سوابق در TFORMS ثبت می‌شود.
             @"IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
                  AND NOT EXISTS (SELECT 1 FROM [dbo].[TFORMS] WHERE FORMNAME = N'AUDITTRAIL')
               BEGIN
@@ -213,6 +201,28 @@ namespace ScriptSqly.Migrations
                           ISNULL((SELECT TOP 1 GRP FROM [dbo].[TFORMS] WHERE FORMNAME = N'USERS'), 16),
                           (SELECT ISNULL(MAX(IDH), 0) + 1 FROM [dbo].[TFORMS]),
                           GETDATE());
+              END",
+
+            // ── ایجاد بستر دسترسی در SAL_CHEK (پیش‌فرض غیرفعال) ─────────
+            // سطرهای فرم در SAL_CHEK برای کلیه کاربران با مقدار پیش‌فرض
+            // غیرفعال (RUN = 0) ایجاد می‌شود تا بستر دسترسی فراهم باشد و در
+            // فرم مدیریت مجوزها قابل مشاهده و تخصیص باشد.
+            @"IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
+                 AND OBJECT_ID(N'[dbo].[SAL_CHEK]', N'U') IS NOT NULL
+                 AND OBJECT_ID(N'[dbo].[SALA_DTL]', N'U') IS NOT NULL
+              BEGIN
+                  DECLARE @AuditId INT = (SELECT IDH FROM [dbo].[TFORMS] WHERE FORMNAME = N'AUDITTRAIL');
+
+                  IF @AuditId IS NOT NULL
+                  BEGIN
+                      INSERT INTO [dbo].[SAL_CHEK] (USERCO, [OBJECT], RUN, SEE, INP, UPD, DEL, CRT)
+                      SELECT D.IDD, @AuditId, 0, 0, 0, 0, 0, GETDATE()
+                      FROM [dbo].[SALA_DTL] D
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM [dbo].[SAL_CHEK] E
+                          WHERE E.USERCO = D.IDD AND E.[OBJECT] = @AuditId
+                      );
+                  END
               END",
 
             // ── نمای خط زمانی: رویداد + اطلاعات نشست، یکجا ───────────────

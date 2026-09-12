@@ -518,7 +518,10 @@ USING (VALUES
   N'این نرخ منفی معمولاً پیامد یک کاردکس منفی (CHK-01) در تاریخی نزدیک همین سند است. آن مغایرت را بررسی و در صورت لزوم فیِ این سند را دستی به نرخ واقعیِ همان لحظه اصلاح کنید.', 49),
 
  ('CHK-21', N'تاریخ برگشت فروش با تاریخ سند حسابداری‌اش یکی نیست', 'S00', 23, 1, NULL,
-  N'از دکمه‌ی «اصلاح تاریخ» کنار همین ردیف استفاده کنید و تاریخ درست را انتخاب کنید — تا وقتی این دو یکی نشوند، کاردکس این حواله را در ماهِ خودش می‌بیند ولی حسابداری در ماهِ دیگر، و CHK-02 مغایرتِ کاذب نشان می‌دهد.', 50)
+  N'از دکمه‌ی «اصلاح تاریخ» کنار همین ردیف استفاده کنید و تاریخ درست را انتخاب کنید — تا وقتی این دو یکی نشوند، کاردکس این حواله را در ماهِ خودش می‌بیند ولی حسابداری در ماهِ دیگر، و CHK-02 مغایرتِ کاذب نشان می‌دهد.', 50),
+
+ ('CHK-23', N'برگه بدون فاکتور یا سند حسابداری', 'S00', 25, 1, NULL,
+  N'کالا از انبار رفته یا آمده و کاردکس آن را شمرده، ولی نه فاکتوری برایش بریده شده نه سندی — یا برعکس، فاکتور و سند هست و برگه‌ی انبار نیست. تا وقتی این دو طرف کامل نشوند، بهای تمام‌شده و حسابداری یکی را می‌بینند و دیگری را نه، و CHK-02 همین را به‌صورت مغایرت نشان می‌دهد بدون اینکه ریشه‌اش را بگوید.', 52)
 ) AS s (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, Threshold, RemedyText, SortOrder)
 ON t.RuleCode = s.RuleCode
 -- ⚠️ Threshold عمداً از WHEN MATCHED بیرون است: کاربر می‌تواند از تنظیمات
@@ -1215,6 +1218,87 @@ BEGIN
       AND   h24.DATE_N <> h25.DATE_N
       AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
                         WHERE ae.RuleCode = 'CHK-21' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
+
+    /* ─── CHK-23 : برگه‌ی ورود/خروجی که فاکتور یا سند حسابداری ندارد ───
+
+       کالا از انبار رفته یا آمده، کاردکس آن را شمرده، ولی هیچ‌کس بابتش
+       نه فاکتوری بریده نه سندی زده. بهای تمام‌شده از کاردکس ساخته
+       می‌شود و حسابداری از سند؛ وقتی یکی هست و دیگری نیست، CHK-02
+       مغایرت نشان می‌دهد بدون اینکه بگوید ریشه‌اش «برگه‌ی ناتمام» است.
+       این کنترل همان ریشه را یک مرحله زودتر و با نام می‌گوید.
+
+       ⚠️ سند روی *فاکتور* می‌نشیند نه روی حواله. روی همین پایگاه، هر
+       ۲۵۹۰ حواله‌ی فروشِ بدون N_S فاکتوری دارند که N_S دارد — یعنی
+       کاملاً سالم‌اند. اگر معیار را «N_S خودِ برگه» می‌گذاشتیم، دو هزار
+       و پانصد هشدارِ کاذب می‌داد. پس سند را روی زوجِ برگه/فاکتور
+       می‌سنجیم، نه روی برگه‌ی تنها.
+
+       زوج‌ها: رسید خرید (۱) با فاکتور خرید (۱۲)، حواله فروش (۲) با
+       فاکتور فروش (۱۳)، قلم برگشت فروش (۲۴) با سربرگش (۲۵).
+       برگه‌هایی که اصلاً مفهومِ فاکتور ندارند (انتقالی ۵، ورود تولید ۹،
+       حواله خروج مواد ۱۰ و ۱۱) فقط از نظر سند سنجیده می‌شوند. */
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S00', 'CHK-23', 25, 1,
+            CAST(h.NUMBER AS BIGINT), h.TAG, h.DATE_N,
+            (SELECT SUM(L.MABL_K) FROM dbo.INVO_LST L
+             WHERE L.NUMBER = h.NUMBER AND L.TAG = h.TAG),
+            CONCAT(ISNULL(tc.BARGAH, N'برگه'), N' ', h.NUMBER, N' مورخ ',
+                   FORMAT(h.DATE_N, '0000/00/00'), N': ',
+                   CASE WHEN pair.TagCode IS NOT NULL AND inv.NUMBER IS NULL
+                        THEN N'فاکتوری برایش صادر نشده و سند حسابداری هم ندارد'
+                        ELSE N'سند حسابداری برایش صادر نشده' END,
+                   N' — کاردکس این حرکت را می‌شمارد ولی حسابداری نه')
+    FROM    dbo.HEAD_LST h
+    LEFT    JOIN dbo.TAGCOD tc ON tc.CODE = h.TAG
+    OUTER   APPLY (SELECT CASE h.TAG WHEN 1 THEN 12 WHEN 2 THEN 13
+                                     WHEN 24 THEN 25 END AS TagCode) pair
+    LEFT    JOIN dbo.HEAD_LST inv ON pair.TagCode IS NOT NULL
+                                 AND inv.TAG = pair.TagCode
+                                 AND inv.NUMBER = h.NUMBER
+    WHERE   h.TAG IN (1, 2, 5, 9, 10, 11, 24, 26)
+      AND   h.DATE_N BETWEEN @DT1 AND @DT2
+      AND   (h.N_S IS NULL OR h.N_S = 0)
+      AND   (inv.N_S IS NULL OR inv.N_S = 0)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-23' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
+
+    /* ─── CHK-23 (بخش دوم) : فاکتوری که برگه‌ی انبارش نیست ───
+
+       بخش اول برگه‌ی بی‌فاکتور را می‌گیرد؛ این یکی عکسش است و بدتر:
+       فاکتور هست، سند حسابداری هم خورده، ولی هیچ حواله یا رسیدی در
+       انبار نیست. یعنی حسابداری این حرکت را ثبت کرده و کاردکس اصلاً
+       نمی‌بیندش — درست برعکسِ حالت اول، و باز هم CHK-02.
+
+       ⚠️ اینجا برخلاف بخش اول، *داشتنِ* سند مشکل را بزرگ‌تر می‌کند نه
+       کوچک‌تر، پس شرطِ نداشتنِ سند را نمی‌گذاریم. نمونه‌ی واقعی روی
+       همین پایگاه: فاکتور فروش ۶۲۶۵ مورخ ۱۴۰۵/۰۶/۰۱ سند ۱۶۱۰۱ دارد
+       ولی حواله‌ی فروشی به آن شماره وجود ندارد. */
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S00', 'CHK-23', 25, 1,
+            CAST(i.NUMBER AS BIGINT), i.TAG, i.DATE_N,
+            (SELECT SUM(L.MABL_K) FROM dbo.INVO_LST L
+             WHERE L.NUMBER = i.NUMBER AND L.TAG = i.TAG),
+            CONCAT(CASE i.TAG WHEN 13 THEN N'فاکتور فروش' ELSE N'فاکتور خرید' END,
+                   N' ', i.NUMBER, N' مورخ ', FORMAT(i.DATE_N, '0000/00/00'),
+                   N': ',
+                   CASE i.TAG WHEN 13 THEN N'حواله‌ی انباری' ELSE N'رسید انباری' END,
+                   N' به این شماره وجود ندارد',
+                   CASE WHEN i.N_S > 0
+                        THEN CONCAT(N' — ولی سند حسابداری ', i.N_S,
+                                    N' برایش صادر شده؛ حسابداری این حرکت را دارد و کاردکس ندارد')
+                        ELSE N'' END)
+    FROM    dbo.HEAD_LST i
+    WHERE   i.TAG IN (12, 13)
+      AND   i.DATE_N BETWEEN @DT1 AND @DT2
+      AND   NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST d
+                        WHERE d.NUMBER = i.NUMBER
+                          AND d.TAG = CASE i.TAG WHEN 13 THEN 2 ELSE 1 END)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-23' AND ae.IsActive = 1
                           AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
 
     /* ─── CHK-20 : نرخ میانگین منفی ───

@@ -162,6 +162,15 @@ GO
 IF COL_LENGTH('dbo.CC_Exception','RuleCode') IS NULL
     ALTER TABLE dbo.CC_Exception ADD RuleCode VARCHAR(12) NULL;
 GO
+/* S05 موقع ساختِ CHK-02 مي‌داند مغايرت از نوعِ افتتاحيه است يا نه
+   (CTEهاي MissingOpening/ExtraOpening). تا امروز اين فقط داخلِ متنِ
+   Description مي‌نشست و صفحه‌ي مغايرت‌ها مجبور بود از نو حدس بزند.
+   ⚠️ بدون اين ستون، کوئريِ GetExceptions با «Invalid column name»
+   مي‌افتد و فهرستِ مغايرت‌ها اصلاً باز نمي‌شود. */
+IF COL_LENGTH('dbo.CC_Exception','OpeningKind') IS NULL
+    ALTER TABLE dbo.CC_Exception ADD OpeningKind TINYINT NULL;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_CC_Exception_Run')
     CREATE INDEX IX_CC_Exception_Run
         ON dbo.CC_Exception(RunId, StepCode, IsResolved, Severity);
@@ -509,7 +518,10 @@ USING (VALUES
   N'این نرخ منفی معمولاً پیامد یک کاردکس منفی (CHK-01) در تاریخی نزدیک همین سند است. آن مغایرت را بررسی و در صورت لزوم فیِ این سند را دستی به نرخ واقعیِ همان لحظه اصلاح کنید.', 49),
 
  ('CHK-21', N'تاریخ برگشت فروش با تاریخ سند حسابداری‌اش یکی نیست', 'S00', 23, 1, NULL,
-  N'از دکمه‌ی «اصلاح تاریخ» کنار همین ردیف استفاده کنید و تاریخ درست را انتخاب کنید — تا وقتی این دو یکی نشوند، کاردکس این حواله را در ماهِ خودش می‌بیند ولی حسابداری در ماهِ دیگر، و CHK-02 مغایرتِ کاذب نشان می‌دهد.', 50)
+  N'از دکمه‌ی «اصلاح تاریخ» کنار همین ردیف استفاده کنید و تاریخ درست را انتخاب کنید — تا وقتی این دو یکی نشوند، کاردکس این حواله را در ماهِ خودش می‌بیند ولی حسابداری در ماهِ دیگر، و CHK-02 مغایرتِ کاذب نشان می‌دهد.', 50),
+
+ ('CHK-23', N'برگه بدون فاکتور یا سند حسابداری', 'S00', 25, 1, NULL,
+  N'کالا از انبار رفته یا آمده و کاردکس آن را شمرده، ولی نه فاکتوری برایش بریده شده نه سندی — یا برعکس، فاکتور و سند هست و برگه‌ی انبار نیست. تا وقتی این دو طرف کامل نشوند، بهای تمام‌شده و حسابداری یکی را می‌بینند و دیگری را نه، و CHK-02 همین را به‌صورت مغایرت نشان می‌دهد بدون اینکه ریشه‌اش را بگوید.', 52)
 ) AS s (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, Threshold, RemedyText, SortOrder)
 ON t.RuleCode = s.RuleCode
 -- ⚠️ Threshold عمداً از WHEN MATCHED بیرون است: کاربر می‌تواند از تنظیمات
@@ -1206,6 +1218,87 @@ BEGIN
       AND   h24.DATE_N <> h25.DATE_N
       AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
                         WHERE ae.RuleCode = 'CHK-21' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
+
+    /* ─── CHK-23 : برگه‌ی ورود/خروجی که فاکتور یا سند حسابداری ندارد ───
+
+       کالا از انبار رفته یا آمده، کاردکس آن را شمرده، ولی هیچ‌کس بابتش
+       نه فاکتوری بریده نه سندی زده. بهای تمام‌شده از کاردکس ساخته
+       می‌شود و حسابداری از سند؛ وقتی یکی هست و دیگری نیست، CHK-02
+       مغایرت نشان می‌دهد بدون اینکه بگوید ریشه‌اش «برگه‌ی ناتمام» است.
+       این کنترل همان ریشه را یک مرحله زودتر و با نام می‌گوید.
+
+       ⚠️ سند روی *فاکتور* می‌نشیند نه روی حواله. روی همین پایگاه، هر
+       ۲۵۹۰ حواله‌ی فروشِ بدون N_S فاکتوری دارند که N_S دارد — یعنی
+       کاملاً سالم‌اند. اگر معیار را «N_S خودِ برگه» می‌گذاشتیم، دو هزار
+       و پانصد هشدارِ کاذب می‌داد. پس سند را روی زوجِ برگه/فاکتور
+       می‌سنجیم، نه روی برگه‌ی تنها.
+
+       زوج‌ها: رسید خرید (۱) با فاکتور خرید (۱۲)، حواله فروش (۲) با
+       فاکتور فروش (۱۳)، قلم برگشت فروش (۲۴) با سربرگش (۲۵).
+       برگه‌هایی که اصلاً مفهومِ فاکتور ندارند (انتقالی ۵، ورود تولید ۹،
+       حواله خروج مواد ۱۰ و ۱۱) فقط از نظر سند سنجیده می‌شوند. */
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S00', 'CHK-23', 25, 1,
+            CAST(h.NUMBER AS BIGINT), h.TAG, h.DATE_N,
+            (SELECT SUM(L.MABL_K) FROM dbo.INVO_LST L
+             WHERE L.NUMBER = h.NUMBER AND L.TAG = h.TAG),
+            CONCAT(ISNULL(tc.BARGAH, N'برگه'), N' ', h.NUMBER, N' مورخ ',
+                   FORMAT(h.DATE_N, '0000/00/00'), N': ',
+                   CASE WHEN pair.TagCode IS NOT NULL AND inv.NUMBER IS NULL
+                        THEN N'فاکتوری برایش صادر نشده و سند حسابداری هم ندارد'
+                        ELSE N'سند حسابداری برایش صادر نشده' END,
+                   N' — کاردکس این حرکت را می‌شمارد ولی حسابداری نه')
+    FROM    dbo.HEAD_LST h
+    LEFT    JOIN dbo.TAGCOD tc ON tc.CODE = h.TAG
+    OUTER   APPLY (SELECT CASE h.TAG WHEN 1 THEN 12 WHEN 2 THEN 13
+                                     WHEN 24 THEN 25 END AS TagCode) pair
+    LEFT    JOIN dbo.HEAD_LST inv ON pair.TagCode IS NOT NULL
+                                 AND inv.TAG = pair.TagCode
+                                 AND inv.NUMBER = h.NUMBER
+    WHERE   h.TAG IN (1, 2, 5, 9, 10, 11, 24, 26)
+      AND   h.DATE_N BETWEEN @DT1 AND @DT2
+      AND   (h.N_S IS NULL OR h.N_S = 0)
+      AND   (inv.N_S IS NULL OR inv.N_S = 0)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-23' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
+
+    /* ─── CHK-23 (بخش دوم) : فاکتوری که برگه‌ی انبارش نیست ───
+
+       بخش اول برگه‌ی بی‌فاکتور را می‌گیرد؛ این یکی عکسش است و بدتر:
+       فاکتور هست، سند حسابداری هم خورده، ولی هیچ حواله یا رسیدی در
+       انبار نیست. یعنی حسابداری این حرکت را ثبت کرده و کاردکس اصلاً
+       نمی‌بیندش — درست برعکسِ حالت اول، و باز هم CHK-02.
+
+       ⚠️ اینجا برخلاف بخش اول، *داشتنِ* سند مشکل را بزرگ‌تر می‌کند نه
+       کوچک‌تر، پس شرطِ نداشتنِ سند را نمی‌گذاریم. نمونه‌ی واقعی روی
+       همین پایگاه: فاکتور فروش ۶۲۶۵ مورخ ۱۴۰۵/۰۶/۰۱ سند ۱۶۱۰۱ دارد
+       ولی حواله‌ی فروشی به آن شماره وجود ندارد. */
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S00', 'CHK-23', 25, 1,
+            CAST(i.NUMBER AS BIGINT), i.TAG, i.DATE_N,
+            (SELECT SUM(L.MABL_K) FROM dbo.INVO_LST L
+             WHERE L.NUMBER = i.NUMBER AND L.TAG = i.TAG),
+            CONCAT(CASE i.TAG WHEN 13 THEN N'فاکتور فروش' ELSE N'فاکتور خرید' END,
+                   N' ', i.NUMBER, N' مورخ ', FORMAT(i.DATE_N, '0000/00/00'),
+                   N': ',
+                   CASE i.TAG WHEN 13 THEN N'حواله‌ی انباری' ELSE N'رسید انباری' END,
+                   N' به این شماره وجود ندارد',
+                   CASE WHEN i.N_S > 0
+                        THEN CONCAT(N' — ولی سند حسابداری ', i.N_S,
+                                    N' برایش صادر شده؛ حسابداری این حرکت را دارد و کاردکس ندارد')
+                        ELSE N'' END)
+    FROM    dbo.HEAD_LST i
+    WHERE   i.TAG IN (12, 13)
+      AND   i.DATE_N BETWEEN @DT1 AND @DT2
+      AND   NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST d
+                        WHERE d.NUMBER = i.NUMBER
+                          AND d.TAG = CASE i.TAG WHEN 13 THEN 2 ELSE 1 END)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-23' AND ae.IsActive = 1
                           AND (ae.Anbar IS NULL) AND (ae.Code IS NULL));
 
     /* ─── CHK-20 : نرخ میانگین منفی ───
@@ -7844,6 +7937,57 @@ GO
             TryExecuteCostCloseBatch(db, gateBlocking,
                 "CC_CheckRule.IsBlocking",
                 "اسکريپت 33-gate-blocking-rules.sql را اجرا کنيد (به CC_CheckRule نياز دارد).");
+
+            // --- 34-run-heartbeat.sql ---
+            string runHeartbeat = @"
+/* ضربانِ اجرا: صف در حافظه‌ي پروسه است، پس اگر سرور وسط يک اجرا
+   ري‌استارت شود CC_Run.Status روي «در حال اجرا» مي‌ماند — براي هميشه.
+   StartedAtUtc نمي‌گويد هنوز زنده است؛ اين ستون مي‌گويد. */
+IF COL_LENGTH('dbo.CC_Run', 'LastHeartbeatUtc') IS NULL
+    ALTER TABLE dbo.CC_Run ADD LastHeartbeatUtc DATETIME2 NULL;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.CC_sp_ReleaseStaleRuns
+    @StaleMinutes INT = 15
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @freed TABLE (RunId INT, Silent INT);
+
+    UPDATE  r
+       SET  r.Status = 2,
+            r.Note   = LEFT(ISNULL(r.Note + N' | ', N'')
+                       + N'به‌صورت خودکار متوقف شد: '
+                       + CAST(DATEDIFF(MINUTE,
+                              ISNULL(r.LastHeartbeatUtc, r.StartedAtUtc),
+                              SYSUTCDATETIME()) AS NVARCHAR(10))
+                       + N' دقيقه بي‌ضربان (سرور احتمالاً ري‌استارت شده).', 500)
+    OUTPUT  inserted.RunId,
+            DATEDIFF(MINUTE, ISNULL(deleted.LastHeartbeatUtc, deleted.StartedAtUtc),
+                     SYSUTCDATETIME())
+    INTO    @freed
+    FROM    dbo.CC_Run r
+    WHERE   r.Status = 1
+      AND   DATEDIFF(MINUTE,
+                     ISNULL(r.LastHeartbeatUtc, r.StartedAtUtc),
+                     SYSUTCDATETIME()) >= @StaleMinutes;
+
+    INSERT  dbo.CC_RunLog (RunId, StepCode, Severity, Message)
+    SELECT  f.RunId, NULL, 2,
+            CONCAT(N'اجرا ', f.Silent, N' دقيقه هيچ نشانه‌ي حياتي نداشت و ',
+                   N'به «متوقف‌شده» تغيير کرد. با «ادامه اجرا» مي‌توانيد ادامه دهيد.')
+    FROM    @freed f;
+
+    SELECT RunId, Silent AS SilentMinutes FROM @freed;
+END
+GO
+
+PRINT N'ضربانِ اجرا و CC_sp_ReleaseStaleRuns آماده شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, runHeartbeat,
+                "CC_Run.LastHeartbeatUtc و CC_sp_ReleaseStaleRuns",
+                "اسکريپت 34-run-heartbeat.sql را اجرا کنيد (به CC_Run نياز دارد).");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

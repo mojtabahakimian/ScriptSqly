@@ -3914,6 +3914,23 @@ BEGIN
        مقصر متوقف مي‌کند — نه اينکه بي‌صدا تا سقفِ ۴۰ دور بسوزد. */
     DECLARE @DampAbove FLOAT = 0.10;
 
+    /* ⚠️ و ميرايي فقط براي کالايي که واقعاً توليد مي‌شود.
+       ── چرا ──
+       ميرايي حلقه‌ي بازخورد را رام مي‌کند: خروجيِ کالا به ورودي خودش
+       برمي‌گردد و بدون ترمز واگرا مي‌شود. کالايي که توليد نمي‌شود چنين
+       حلقه‌اي ندارد — نرخش مستقيم از ميانگين انبار مي‌آيد (Src=1) و آن
+       عدد قطعي است، پس بايد همان پاس اول پذيرفته شود.
+
+       کد ۲۰۲۱ روي newpoodr1405: نرخ واقعي‌اش صفر است، ولي چون از
+       ۱۵٬۷۲۳ شروع کرده بود و جهش به صفر ۱۰۰٪ است، هر پاس فقط ۳۵٪ فاصله
+       را مي‌بست — ۱۵٬۷۲۳ → ۱۰٬۲۲۰ → ۶٬۶۴۳ → … و رسيدن به زير يک ريال
+       ~۲۱ پاس مي‌خواست. اين کالا هيچ‌وقت توليد نمي‌شود، فقط خريده
+       مي‌شود؛ هيچ چيزي براي واگرا شدن ندارد.
+
+       #F.Qty مقدارِ واقعاً توليدشده‌ي همين ماه است (از برگه‌هاي توليدي
+       که N_KOL آنها به FNUMB اشاره مي‌کند) — همان ملاکي که در بازسازي
+       نرخ ميانگين هم براي «توليدي بودن» به کار مي‌رود. */
+
     /* ─── دروازه‌ي «نرخِ ممکن» ───
        ⚠️ فيکسِ واگراييِ کد ۳۳۶۵ (ماه ۵، ران ۱۰ — روي داده‌ي واقعي تشخيص
        داده شد): ميانگينِ انبارِ اين کالا يک بار منفي درآمد. همان عدد
@@ -3961,7 +3978,13 @@ BEGIN
                  ELSE N'ميانگين انبارِ اين کالا خارج از هر مقياسِ ممکن است و پذيرفته نشد'
             END
     FROM    #Z z
-    WHERE   z.fi IS NOT NULL AND (z.fi <= 0 OR ABS(z.fi) >= @RateCeiling);
+    WHERE   z.fi IS NOT NULL
+      AND  (z.fi < 0 OR ABS(z.fi) >= @RateCeiling
+            -- صفر فقط براي کالايي مشکوک است که توليد مي‌شود؛ براي کالاي
+            -- خريدني، صفر يک نرخِ واقعي است نه نرخِ گم‌شده.
+            OR (z.fi = 0 AND EXISTS (SELECT 1 FROM #F f
+                                     WHERE f.Code = z.Code AND f.Qty > 0)));
+
 
     UPDATE  c
        SET  c.Mat = CASE
@@ -3972,6 +3995,9 @@ BEGIN
                       WHEN prev.MaterialCost > 0
                        AND prev.MaterialCost < @RateCeiling
                        AND ABS(z.fi - prev.MaterialCost) > @DampAbove * prev.MaterialCost
+                       -- و فقط کالايي که همين ماه واقعاً توليد شده
+                       AND EXISTS (SELECT 1 FROM #F f
+                                   WHERE f.Code = c.Code AND f.Qty > 0)
                       THEN prev.MaterialCost + @Damping * (z.fi - prev.MaterialCost)
                       ELSE z.fi
                     END,
@@ -3981,7 +4007,18 @@ BEGIN
     JOIN    #Z z ON z.Code = c.Code
     LEFT    JOIN dbo.CC_ItemCost prev
             ON  prev.RunId = @RunId AND prev.Code = c.Code
-    WHERE   z.fi > 0 AND z.fi < @RateCeiling;
+    /* ⚠️ صفر هم يک نرخ است.
+       قبلاً شرط z.fi > 0 بود، يعني ميانگينِ صفر «نرخ ندارد» خوانده
+       مي‌شد و کالا به آبشار BOM برمي‌گشت. براي کالايي که توليد نمي‌شود
+       اين غلط است: اگر همه‌ي خريدهايش صفر بوده، نرخش صفر است و فرمولِ
+       بلااستفاده‌اش نبايد جايش را بگيرد.
+       کد ۲۰۲۱: ميانگين انبار صفر، ولي فرمولِ هرگز-اجرانشده‌اش ۱۵٬۷۲۳ —
+       و همان ۱۵٬۷۲۳ برمي‌گشت. */
+    WHERE   z.fi < @RateCeiling
+      AND  (z.fi > 0
+            OR (z.fi = 0 AND NOT EXISTS (SELECT 1 FROM #F f
+                                         WHERE f.Code = c.Code AND f.Qty > 0)));
+
 
     ---- بدون گردش در ماه: آخرين نرخ ميانگين ثبت‌شده
     UPDATE  c
@@ -4052,10 +4089,17 @@ BEGIN
         ---- روي همان کد جمع بزنيم، دستمزد/سربار دوبار حساب مي‌شود — دقيقاً
         ---- همان چيزي که مغايرت ۷۷۱ را نصفه رفع کرده بود (Mat درست شد ولي
         ---- Wage هنوز از BOM اضافه مي‌آمد).
+        /* ⚠️ «نرخ از انبار آمده» با «نرخ صفر است» يکي نيست.
+           شرط c.Mat <> 0 هر دو را يکسان مي‌ديد: کالايي که ميانگين انبارش
+           واقعاً صفر است، اينجا دوباره بهاي BOM را مي‌گرفت — همان چيزي
+           که گام ۴ تازه ردش کرده بود.
+           ملاک درست خودِ Src است: ۱ يعني نرخ از ميانگين انبار تعيين شده،
+           هرچه باشد. کد ۲۰۲۱: انبارش صفر است ولي فرمولِ هرگز-اجرانشده‌اش
+           ۱۵٬۷۲۳ — و همان برمي‌گشت. */
         UPDATE  c
-           SET  c.Wage = CASE WHEN c.Mat <> 0 THEN 0 ELSE w.Wage END,
-                c.Oh   = CASE WHEN c.Mat <> 0 THEN 0 ELSE w.Oh   END,
-                c.Mat  = CASE WHEN c.Mat <> 0 THEN c.Mat ELSE w.Mat END
+           SET  c.Wage = CASE WHEN c.Src = 1 THEN 0 ELSE w.Wage END,
+                c.Oh   = CASE WHEN c.Src = 1 THEN 0 ELSE w.Oh   END,
+                c.Mat  = CASE WHEN c.Src = 1 THEN c.Mat ELSE w.Mat END
         FROM    #C c
         CROSS   APPLY (
                     SELECT

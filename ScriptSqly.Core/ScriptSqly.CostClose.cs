@@ -5084,9 +5084,11 @@ BEGIN
             f.Weight,
             f.NetSales,
             ISNULL(b.Cost, ISNULL(ic.TotalCost, 0) * f.Qty),
-            CASE WHEN f.Qty <> 0
+            /* کفِ مقداري، نه «مخالف صفر»: مقدارِ يک‌ميليونيمِ واحد واقعي
+               نيست و تقسيم بر آن نرخِ نجومي مي‌سازد. */
+            CASE WHEN ABS(f.Qty) > 0.000001
                  THEN ISNULL(b.Cost, ISNULL(ic.TotalCost,0) * f.Qty) / f.Qty END,
-            CASE WHEN f.Qty <> 0 THEN f.NetSales / f.Qty END
+            CASE WHEN ABS(f.Qty) > 0.000001 THEN f.NetSales / f.Qty END
     FROM    Forush f
     LEFT    JOIN Baha b ON b.Code = f.Code
     LEFT    JOIN dbo.CC_ItemCost ic ON ic.Code = f.Code AND ic.RunId = @RunId
@@ -5380,7 +5382,11 @@ BEGIN
             m.SalesAmount                 AS مبلغ_خالص,
             m.CostAmount                  AS مبلغ_ريالي,
             m.Profit                      AS سود,
-            CASE WHEN m.SalesAmount <> 0
+            /* ⚠️ آستانه، نه فقط «مخالف صفر». کالايي با يک ريال فروش
+               درصدِ ۴۳ ميلياردي مي‌گرفت؛ عددي که نه خوانا بود و نه در
+               اکسل جا مي‌شد (خروجي را با OverflowException مي‌انداخت).
+               همان قاعده‌ي «زير ۱۰۰۰ ريال صفر است». */
+            CASE WHEN ABS(m.SalesAmount) >= 1000
                  THEN ROUND(m.Profit / m.SalesAmount * 100, 0) END AS درصد
     FROM    dbo.CC_ItemMargin m
     LEFT    JOIN dbo.STUF_DEF s ON TRY_CAST(s.CODE AS BIGINT) = m.Code

@@ -2180,7 +2180,7 @@ BEGIN
 		INTO @MissingItemName;
 		WHILE @@FETCH_STATUS = 0
 		BEGIN
-			PRINT N'تذکر مهم: کالای «' + @MissingItemName + N'» برای این ویزیتور الگو ندارد.';
+			PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و با درصد خودِ سطر حساب شد.';
 			FETCH NEXT FROM MissingItemsCursor
 			INTO @MissingItemName;
 		END;
@@ -2255,15 +2255,36 @@ BEGIN
 		SET @TotalPorsant = ISNULL(@TotalPorsant, 0);
 		SET @TotalMablk = ISNULL(@TotalMablk, 0);
 
-		-- ========== ۶. محاسبه درصد نهایی ==========
-		-- درصد = مبلغ پورسانت ÷ مبنای کل فاکتور، نه ÷ جمع کالاهای دارای نرخ. تقسیم بر
-		-- جمعِ کالاهای دارای نرخ، سطری را که مثلاً ۸۰ هزار تومان پورسانت گرفته بود «۲٪»
-		-- نشان می‌داد، و چون فرم مبلغ را از همین درصد و مبنای کل می‌سازد، مبلغ به ۲٪ کلِ
-		-- فاکتور می‌پرید و صدور سند دوباره برش می‌گرداند — رفت‌وبرگشتی بی‌پایان.
-		IF ISNULL(@InvoiceBase, 0) <> 0
-			SET @Darsad = @TotalPorsant / @InvoiceBase * 100.0;
-		ELSE
-			SET @Darsad = 0;
+		-- ========== ۶. سهم بخشی که الگو نرخی برایش ندارد ==========
+		-- کالای بدون نرخ در الگو دیگر صفر نمی‌گیرد؛ خالصش به‌علاوه‌ی ارزش افزوده و منهای
+		-- تخفیف سربرگ با درصدِ خودِ سطر حساب می‌شود. عیناً AUTO_BAZ...CL_PORSANT_RULE.ByPattern.
+		DECLARE @UncoveredNet FLOAT = 0;
+
+		SELECT @UncoveredNet = SUM(ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0))
+		FROM dbo.INVO_LST AS IL
+			LEFT JOIN
+			(
+				SELECT CODE, MIN(PORSANT) AS PORSANT
+				FROM dbo.VISITORS_PORSANT_KALA
+				WHERE PORID = @PORID
+				GROUP BY CODE
+				HAVING COUNT(PORSANT) = COUNT(*) AND MIN(PORSANT) = MAX(PORSANT)
+			) AS R
+				ON R.CODE = IL.CODE
+		WHERE IL.NUMBER = @NUMBER
+			  AND IL.TAG = @TAG
+			  AND ISNULL(IL.JAY, 0) = 0
+			  AND R.CODE IS NULL;
+
+		SET @TotalPorsant = @TotalPorsant
+							+ ROUND((ISNULL(@UncoveredNet, 0) - @HeadTakhfif
+									 + CASE WHEN @IncludeVat = 1 THEN @HeadMbaa ELSE 0 END)
+									* ISNULL(@RowDarsad, 0) / 100.0, 0);
+
+		-- درصدِ سطر ورودیِ همین محاسبه است، پس بازنویسی نمی‌شود. اگر مثل قبل با «درصد
+		-- مؤثر» پر شود، اجرای بعدی از همان عددِ کوچک‌شده شروع می‌کند و مبلغ هر بار
+		-- پایین‌تر می‌رود — حلقه‌ای که هیچ‌وقت به عدد پایدار نمی‌رسد.
+		SET @Darsad = ISNULL(@RowDarsad, 0);
 	END;
 
 	-- ========== ۷. درج یا به‌روزرسانی نهایی با بررسی هوشمندانه STAT ==========

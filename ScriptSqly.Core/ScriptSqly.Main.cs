@@ -2152,6 +2152,11 @@ BEGIN
 	--  قدیمیِ این برنامه می‌تواند خطای بریدنِ رشته یا تعارض Collation بدهد.)
 	DECLARE @MissingItemName NVARCHAR(80);
 
+	DECLARE @PreventWithoutPattern BIT = 0;
+	SELECT TOP (1) @PreventWithoutPattern = CASE WHEN SUBSTRING(OPTIONSS, 69, 1) = N'5' THEN 1 ELSE 0 END
+	FROM dbo.SAZMAN
+	WHERE OPTIONSS IS NOT NULL;
+
 	IF @NoPattern = 0
 	BEGIN
 		-- LOCAL: کرسر سراسری با نامِ ثابت، اگر دو کاربر هم‌زمان فاکتور ذخیره کنند
@@ -2180,7 +2185,10 @@ BEGIN
 		INTO @MissingItemName;
 		WHILE @@FETCH_STATUS = 0
 		BEGIN
-			PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و با درصد خودِ سطر حساب شد.';
+			IF @PreventWithoutPattern = 1
+				PRINT N'خطا: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و ثبت فاکتور مسدود است.';
+			ELSE
+				PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و با درصد خودِ سطر حساب شد.';
 			FETCH NEXT FROM MissingItemsCursor
 			INTO @MissingItemName;
 		END;

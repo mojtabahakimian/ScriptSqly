@@ -26,6 +26,18 @@ namespace ScriptSqly.Migrations
                 // می‌کند که همه چیز از قبل ساخته شده یا نه.
                 AuditScript(db, isCustomCall);
 
+                // ردیف‌های PGET_LST مرجع چاپ اسناد تاریخی خزانه هستند؛ جداول چک فقط
+                // اطلاعات تکمیلی می‌دهند و تغییر وضعیت فعلی‌شان نباید ردیفی را حذف/تکرار کند.
+                // شکست این اصلاح نباید ورود کاربر به برنامه را متوقف کند، ولی باید قابل پیگیری باشد.
+                try
+                {
+                    TreasuryDocumentReportViewsScript(db, previewOnly: false);
+                }
+                catch (Exception ex)
+                {
+                    LogNonBlockingMigrationFailure(nameof(TreasuryDocumentReportViewsScript), db.Database, ex);
+                }
+
                 #region SALARY
                 if (_type_ == 2) //مخصوص حقوق
                 {
@@ -4662,6 +4674,239 @@ END
                     }
                     catch (Exception) { }
                 }
+            }
+        }
+
+        private static void LogNonBlockingMigrationFailure(string migrationName, string databaseName, Exception exception)
+        {
+            var message = $"[{DateTime.Now:O}] Non-blocking migration '{migrationName}' failed for database '{databaseName}'.{Environment.NewLine}{exception}{Environment.NewLine}";
+            System.Diagnostics.Trace.TraceError(message);
+
+            try
+            {
+                const string logDirectory = @"C:\Correct";
+                Directory.CreateDirectory(logDirectory);
+                File.AppendAllText(Path.Combine(logDirectory, "ErrorApplicationMine.txt"), message);
+            }
+            catch (Exception logException)
+            {
+                System.Diagnostics.Trace.TraceError($"Could not persist migration failure log: {logException}");
+            }
+        }
+
+        private static void TreasuryDocumentReportViewsScript(SqlConnection db, bool previewOnly)
+        {
+            const string script = @"
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @PaymentNeedsFix bit = CASE
+    WHEN OBJECT_ID(N'dbo.sanadpar_sub', N'V') IS NULL THEN 1
+    WHEN CHARINDEX(N'MrCorrect: treasury document rows v4',
+                   ISNULL(OBJECT_DEFINITION(OBJECT_ID(N'dbo.sanadpar_sub')), N'')) = 0 THEN 1
+    ELSE 0
+END;
+
+DECLARE @ReceiptNeedsFix bit = CASE
+    WHEN OBJECT_ID(N'dbo.sanaddar_sub', N'V') IS NULL THEN 1
+    WHEN CHARINDEX(N'MrCorrect: treasury document rows v4',
+                   ISNULL(OBJECT_DEFINITION(OBJECT_ID(N'dbo.sanaddar_sub')), N'')) = 0 THEN 1
+    ELSE 0
+END;
+
+IF @PREVIEW_ONLY = 1
+BEGIN
+    SELECT N'dbo.sanadpar_sub' AS VIEW_NAME,
+           @PaymentNeedsFix AS NEEDS_FIX,
+           OBJECT_ID(N'dbo.sanadpar_sub', N'V') AS VIEW_OBJECT_ID
+    UNION ALL
+    SELECT N'dbo.sanaddar_sub',
+           @ReceiptNeedsFix,
+           OBJECT_ID(N'dbo.sanaddar_sub', N'V');
+    RETURN;
+END;
+
+IF @PaymentNeedsFix = 0 AND @ReceiptNeedsFix = 0
+    RETURN;
+
+IF OBJECT_ID(N'dbo.PGET_HED', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.PGET_LST', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.PAY_GETP', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.PAY_GETD', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.CUST_HESAB') IS NULL
+   OR OBJECT_ID(N'dbo.TCOD_BANKS', N'U') IS NULL
+    RETURN;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF @PaymentNeedsFix = 1
+    EXEC(N'
+CREATE OR ALTER VIEW dbo.sanadpar_sub
+AS
+-- MrCorrect: treasury document rows v4
+SELECT PGET_HED.MOLAH,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYP.DATE_S ELSE PAYD.DATE_S END AS DATE_S,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYP.SHOBEH ELSE PAYD.SHOBEH END AS SHOBEH,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYP.MABL ELSE PAYD.MABL END AS mabld,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYP.N_HESAB ELSE PAYD.N_HESAB END AS N_HESAB,
+       PGET_LST.ID,
+       PGET_LST.DATE,
+       PGET_LST.RADIF,
+       PGET_LST.NO_AM,
+       PGET_LST.NAHVA,
+       PGET_LST.FHES_K,
+       PGET_LST.FHES_M,
+       PGET_LST.FHES_T,
+       PGET_LST.THES_K,
+       PGET_LST.THES_M,
+       PGET_LST.THES_T,
+       PGET_LST.SHARH,
+       PGET_LST.MABL,
+       PGET_LST.N_SERI,
+       PGET_LST.BANK,
+       PGET_LST.IDH,
+       PGET_LST.FHES,
+       PGET_LST.THES,
+       PGET_LST.ARZD,
+       PGET_LST.FHES_T2,
+       PGET_LST.THES_T2,
+       PGET_LST.FHES_T3,
+       PGET_LST.THES_T3,
+       PGET_LST.FHES_T4,
+       PGET_LST.THES_T4,
+       PGET_LST.CRT,
+       PGET_LST.UID,
+       CUST_HESAB.hes,
+       CUST_HESAB.NAME,
+       TCOD_BANKS.NAMES,
+       PGET_HED.IDK
+FROM dbo.PGET_HED
+INNER JOIN dbo.PGET_LST
+    ON PGET_HED.ID = PGET_LST.ID
+   AND PGET_HED.DATE = PGET_LST.DATE
+OUTER APPLY
+(
+    -- چک پرداختی عادی (2) و غیرتجاری (6) هر دو در PAY_GETP ساخته می‌شوند.
+    SELECT TOP (1) P.DATE_S, P.SHOBEH, P.MABL, P.N_HESAB
+    FROM dbo.PAY_GETP AS P
+    WHERE PGET_LST.NAHVA IN (2, 6)
+      AND P.N_SERI = PGET_LST.N_SERI
+      AND P.BANK = PGET_LST.BANK
+    ORDER BY CASE WHEN ISNULL(P.MABL, 0) = ISNULL(PGET_LST.MABL, 0) THEN 0 ELSE 1 END,
+             P.DATE_S DESC
+) AS PAYP
+OUTER APPLY
+(
+    -- واگذاری/برگشت چک مشتری از PAY_GETD می‌آید؛ NAHVA=6 جزو این مسیر نیست.
+    SELECT TOP (1) D.DATE_S, D.SHOBEH, D.MABL, D.N_HESAB
+    FROM dbo.PAY_GETD AS D
+    WHERE PGET_LST.NAHVA > 3
+      AND PGET_LST.NAHVA <> 6
+      AND D.N_SERI = PGET_LST.N_SERI
+      AND D.BANK = PGET_LST.BANK
+    ORDER BY CASE WHEN ISNULL(D.MABL, 0) = ISNULL(PGET_LST.MABL, 0) THEN 0 ELSE 1 END,
+             D.DATE_S DESC
+) AS PAYD
+LEFT OUTER JOIN dbo.CUST_HESAB
+    ON PGET_LST.FHES = CUST_HESAB.hes
+LEFT OUTER JOIN dbo.TCOD_BANKS
+    ON PGET_LST.BANK = TCOD_BANKS.CODE
+WHERE PGET_LST.NO_AM = 2
+  AND (PGET_LST.NAHVA = 2 OR PGET_LST.NAHVA > 3);
+');
+
+    IF @ReceiptNeedsFix = 1
+    EXEC(N'
+CREATE OR ALTER VIEW dbo.sanaddar_sub
+AS
+-- MrCorrect: treasury document rows v4
+SELECT PGET_HED.MOLAH,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYD.DATE_S ELSE PAYP.DATE_S END AS DATE_S,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYD.SHOBEH ELSE PAYP.SHOBEH END AS SHOBEH,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYD.MABL ELSE PAYP.MABL END AS mabld,
+       CASE WHEN PGET_LST.NAHVA IN (2, 6) THEN PAYD.N_HESAB ELSE PAYP.N_HESAB END AS N_HESAB,
+       PGET_LST.ID,
+       PGET_LST.DATE,
+       PGET_LST.RADIF,
+       PGET_LST.NO_AM,
+       PGET_LST.NAHVA,
+       PGET_LST.FHES_K,
+       PGET_LST.FHES_M,
+       PGET_LST.FHES_T,
+       PGET_LST.THES_K,
+       PGET_LST.THES_M,
+       PGET_LST.THES_T,
+       PGET_LST.SHARH,
+       PGET_LST.MABL,
+       PGET_LST.N_SERI,
+       PGET_LST.BANK,
+       PGET_LST.IDH,
+       PGET_LST.FHES,
+       PGET_LST.THES,
+       PGET_LST.ARZD,
+       PGET_LST.FHES_T2,
+       PGET_LST.THES_T2,
+       PGET_LST.FHES_T3,
+       PGET_LST.THES_T3,
+       PGET_LST.FHES_T4,
+       PGET_LST.THES_T4,
+       PGET_LST.CRT,
+       PGET_LST.UID,
+       CUST_HESAB.hes,
+       CUST_HESAB.NAME,
+       TCOD_BANKS.NAMES,
+       PGET_HED.IDK
+FROM dbo.PGET_HED
+INNER JOIN dbo.PGET_LST
+    ON PGET_HED.ID = PGET_LST.ID
+   AND PGET_HED.DATE = PGET_LST.DATE
+OUTER APPLY
+(
+    -- چک دریافتی عادی (2) و غیرتجاری (6) هر دو در PAY_GETD ساخته می‌شوند.
+    SELECT TOP (1) D.DATE_S, D.SHOBEH, D.MABL, D.N_HESAB
+    FROM dbo.PAY_GETD AS D
+    WHERE PGET_LST.NAHVA IN (2, 6)
+      AND D.N_SERI = PGET_LST.N_SERI
+      AND D.BANK = PGET_LST.BANK
+    ORDER BY CASE WHEN ISNULL(D.MABL, 0) = ISNULL(PGET_LST.MABL, 0) THEN 0 ELSE 1 END,
+             D.DATE_S DESC
+) AS PAYD
+OUTER APPLY
+(
+    -- برگشت چک پرداختی از PAY_GETP می‌آید؛ NAHVA=6 جزو این مسیر نیست.
+    SELECT TOP (1) P.DATE_S, P.SHOBEH, P.MABL, P.N_HESAB
+    FROM dbo.PAY_GETP AS P
+    WHERE PGET_LST.NAHVA > 3
+      AND PGET_LST.NAHVA <> 6
+      AND P.N_SERI = PGET_LST.N_SERI
+      AND P.BANK = PGET_LST.BANK
+    ORDER BY CASE WHEN ISNULL(P.MABL, 0) = ISNULL(PGET_LST.MABL, 0) THEN 0 ELSE 1 END,
+             P.DATE_S DESC
+) AS PAYP
+LEFT OUTER JOIN dbo.CUST_HESAB
+    ON PGET_LST.FHES = CUST_HESAB.hes
+LEFT OUTER JOIN dbo.TCOD_BANKS
+    ON PGET_LST.BANK = TCOD_BANKS.CODE
+WHERE PGET_LST.NO_AM = 1
+  AND (PGET_LST.NAHVA = 2 OR PGET_LST.NAHVA > 3);
+');
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;";
+
+            try
+            {
+                db.Execute(script, new { PREVIEW_ONLY = previewOnly });
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("خطای اصلاح نماهای گزارش اسناد خزانه‌داری.", ex);
             }
         }
     }

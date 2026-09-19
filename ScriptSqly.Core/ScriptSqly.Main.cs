@@ -3996,6 +3996,24 @@ SELECT TOP 100 PERCENT
 FROM BaseData B
 ORDER BY B.NAME;"); } catch { }
 
+                    // رفع تکرار ردیف‌ها در گزارش موجودی/تراز انبار:
+                    // GHAEYMAT_TAMAM_SUB به ازای هر سند تولید (FNUMB) یک ردیف دارد، بنابراین اتصال
+                    // مستقیم GHEYMAT_TAMAM روی CODE در AKMOGUDI_KOL_ANBAR، TARAZ_ANBAR_KOL و
+                    // TARAZ_ANBAR_KHAS_GRP ردیف‌ها (و جمع‌های مبلغی) را چند برابر می‌کرد.
+                    // اکنون فقط آخرین سند تولید هر کالا (بر اساس DATE_ACTIV سپس FNUMB) برگردانده می‌شود.
+                    try { db.Execute(@"CREATE OR ALTER VIEW [dbo].[GHEYMAT_TAMAM]
+AS
+SELECT T.CODE, T.GHEMAT, T.FNUMB
+FROM (
+    SELECT S.CODE,
+           S.SumOfMABLK + S.SumOfIMBIBE_SAR + S.SumOfIMBIBE_MANF AS GHEMAT,
+           S.FNUMB,
+           ROW_NUMBER() OVER (PARTITION BY S.CODE ORDER BY ISNULL(H.DATE_ACTIV, 0) DESC, S.FNUMB DESC) AS RN
+    FROM dbo.GHAEYMAT_TAMAM_SUB AS S
+    LEFT OUTER JOIN dbo.HEAD_MANF AS H ON H.FNUMB = S.FNUMB
+) AS T
+WHERE T.RN = 1;"); } catch { }
+
                     try { db.Execute($@"ALTER TABLE [dbo].[PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به خزانه
                     try { db.Execute($@"ALTER TABLE [dbo].[TR_PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به جدول تاریخچه خزانه
 

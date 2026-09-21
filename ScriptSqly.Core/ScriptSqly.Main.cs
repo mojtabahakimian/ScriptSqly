@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Data;
@@ -69,6 +69,7 @@ namespace ScriptSqly.Migrations
                     }
 
                     SequentialKeyContentionScript(db);
+                    DeedDtlBalanceCoveringIndex(db);
 
                     try
                     {

@@ -8283,6 +8283,132 @@ GO
             TryExecuteCostCloseBatch(db, runHeartbeat,
                 "CC_Run.LastHeartbeatUtc و CC_sp_ReleaseStaleRuns",
                 "اسکريپت 34-run-heartbeat.sql را اجرا کنيد (به CC_Run نياز دارد).");
+
+            // --- 37-ai-config-proxy.sql ---
+            string aiConfigProxy = @"
+/* ═══════════════════════════════════════════════════════════════════
+   دستیار هوش مصنوعی: پروکسی و مدل جایگزین
+
+   ── پروکسی ──
+   از ایران، سرویس‌های خارجی فقط از پشت پروکسی (مثلاً v2rayN روی
+   http://127.0.0.1:10809) در دسترس‌اند. پروکسی فقط روی ارتباطِ دستیار با
+   مدل اعمال می‌شود، نه روی کل سرور؛ بقیه‌ی برنامه و SQL Server مستقیم
+   می‌مانند. خالی = بدون پروکسی.
+
+   ── مدل جایگزین ──
+   اگر مدل اصلی خطا داد یا جواب نداد، همان درخواست یک بار با این مدل (روی
+   همان آدرس و کلید) فرستاده می‌شود. خالی = بدون جایگزین.
+
+   فقط دو ستونِ nullable به جدولِ خود Safir اضافه می‌شود؛ رفتار نصب‌های
+   فعلی عوض نمی‌شود.
+
+   نکته: عمداً هیچ «USE <database>» اینجا نیست — نام پایگاه در هر نصب
+   فرق می‌کند. اسکریپت را روی پایگاه هدف اجرا کنید.
+   ═══════════════════════════════════════════════════════════════════ */
+
+IF COL_LENGTH('dbo.AI_Config', 'ProxyUrl') IS NULL
+    ALTER TABLE dbo.AI_Config ADD ProxyUrl NVARCHAR(300) NULL;
+GO
+
+IF COL_LENGTH('dbo.AI_Config', 'FallbackModel') IS NULL
+    ALTER TABLE dbo.AI_Config ADD FallbackModel NVARCHAR(120) NULL;
+GO
+
+PRINT N'ستون‌هاي ProxyUrl و FallbackModel به AI_Config اضافه شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, aiConfigProxy,
+                "AI_Config.ProxyUrl و FallbackModel",
+                "اسکريپت 37-ai-config-proxy.sql را اجرا کنيد (به AI_Config نياز دارد).");
+
+            // --- 38-ai-readonly-role.sql ---
+            string aiReadonlyRole = @"
+/* ═══════════════════════════════════════════════════════════════════
+   دستیار هوش مصنوعی: نقشِ فقط‌خواندنی
+
+   ── چرا ──
+   ابزار run_sql دستیار کوئریِ نوشته‌ی مدل را اجرا می‌کند. نگهبانِ کد
+   (AiSqlGuard) فقط SELECT می‌پذیرد و جدول‌های حساس را رد می‌کند، ولی سدّ
+   واقعی باید خودِ SQL Server باشد: کاربری که اصلاً اجازه‌ی نوشتن و دیدنِ
+   آن جدول‌ها را ندارد.
+
+   ── این اسکریپت فقط «نقش» را می‌سازد ──
+   login در سطح سرور است و رمز می‌خواهد؛ آن را مدیر سرور با
+   tools/ai_readonly_login.sql جدا می‌سازد و بعد
+   ConnectionStrings:AiReadOnly را در تنظیمات Safir می‌گذارد. تا وقتی آن
+   نباشد، دستیار با اتصالِ عادی برنامه کار می‌کند و رفتار عوض نمی‌شود.
+
+   ── چه چیزی بسته است ──
+   رمز و نام کاربران (SALA_DTL و viewهای SALS/SALSUSER)، مجوزها (SAL_CHEK)،
+   کلید و لاگ دستیار (AI_*)، و حقوق پرسنل (PAY2_* و V_PAY2_*) — همان
+   فهرستِ AiSqlGuard. اجرای رویه (EXECUTE) هم بسته است.
+   ⚠ جدولِ PAY2 تازه‌ای که بعداً ساخته شود خودکار بسته نمی‌شود؛ بعد از هر
+   به‌روزرسانیِ حقوق، این اسکریپت را دوباره اجرا کنید (تکرارش بی‌خطر است).
+
+   اگر کاربرِ اجراکننده اجازه‌ی ساختن نقش نداشته باشد، فقط پیام می‌دهد و
+   بقیه‌ی به‌روزرسانی را متوقف نمی‌کند.
+
+   نکته: عمداً هیچ «USE <database>» اینجا نیست — نام پایگاه در هر نصب
+   فرق می‌کند. اسکریپت را روی پایگاه هدف اجرا کنید.
+   ═══════════════════════════════════════════════════════════════════ */
+
+BEGIN TRY
+    IF DATABASE_PRINCIPAL_ID('safir_ai_reader') IS NULL
+        CREATE ROLE safir_ai_reader;
+
+    GRANT SELECT ON SCHEMA::dbo TO safir_ai_reader;
+    DENY  EXECUTE ON SCHEMA::dbo TO safir_ai_reader;
+
+    DECLARE @sql NVARCHAR(MAX) = N'';
+    SELECT @sql += N'DENY SELECT ON ' + QUOTENAME(SCHEMA_NAME(o.schema_id)) + N'.' + QUOTENAME(o.name)
+                 + N' TO safir_ai_reader;' + NCHAR(10)
+    FROM   sys.objects o
+    WHERE  o.type IN ('U', 'V')
+      AND  (o.name IN (N'SALA_DTL', N'SAL_CHEK', N'SALS', N'SALSUSER',
+                       N'AI_Config', N'AI_UserAccess', N'AI_ChatLog', N'AI_Conversation')
+            OR o.name LIKE N'PAY2[_]%'
+            OR o.name LIKE N'V[_]PAY2[_]%');
+
+    EXEC sys.sp_executesql @sql;
+
+    PRINT N'نقش safir_ai_reader آماده شد.';
+END TRY
+BEGIN CATCH
+    PRINT N'نقش safir_ai_reader ساخته نشد (احتمالاً مجوز کافی نیست): ' + ERROR_MESSAGE();
+END CATCH
+GO
+";
+            TryExecuteCostCloseBatch(db, aiReadonlyRole,
+                "نقش safir_ai_reader",
+                "اسکريپت 38-ai-readonly-role.sql را اجرا کنيد.");
+
+            // --- 39-ai-config-mask-names.sql ---
+            string aiMaskNames = @"
+/* ═══════════════════════════════════════════════════════════════════
+   دستیار هوش مصنوعی: پنهان کردن نام‌ها از مدل
+
+   وقتی روشن است، نام مشتری، کالا و حساب در خروجیِ ابزارها قبل از رفتن به
+   سرویسِ مدل با شناسه (مثل N-0001) جایگزین می‌شود و Safir پیش از نمایش
+   جواب، نام واقعی را برمی‌گرداند. جدول تبدیل فقط در حافظه‌ی سرور Safir است.
+   برای مدلِ محلی (داخل شبکه) می‌شود خاموشش کرد.
+
+   پیش‌فرض: روشن (۱).
+
+   نکته: عمداً هیچ «USE <database>» اینجا نیست — نام پایگاه در هر نصب
+   فرق می‌کند. اسکریپت را روی پایگاه هدف اجرا کنید.
+   ═══════════════════════════════════════════════════════════════════ */
+
+IF COL_LENGTH('dbo.AI_Config', 'MaskNames') IS NULL
+    ALTER TABLE dbo.AI_Config ADD MaskNames BIT NOT NULL
+        CONSTRAINT DF_AI_Config_MaskNames DEFAULT 1;
+GO
+
+PRINT N'ستون MaskNames به AI_Config اضافه شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, aiMaskNames,
+                "AI_Config.MaskNames",
+                "اسکريپت 39-ai-config-mask-names.sql را اجرا کنيد (به AI_Config نياز دارد).");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

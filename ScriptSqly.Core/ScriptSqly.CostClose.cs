@@ -6476,6 +6476,7 @@ INSERT INTO @Forms (FormName, Caption) VALUES
     (N'COST_EXCEPTIONS',            N'مغایرت‌های بستن ماه'),
     (N'COST_VARIANCE',              N'تصمیم انحراف'),
     (N'COST_CONVERSION',            N'هزینه تبدیل'),
+    (N'COST_ITEM_CONV',             N'تبدیل کالا به کالا'),
     (N'COST_MARGIN',                N'سود و زیان کالا'),
     (N'COST_HISTORY',               N'سوابق اجراها'),
     (N'COST_SETTINGS',              N'تنظیمات بستن ماه'),

@@ -5964,7 +5964,7 @@ GO
                 "اسکریپت 20-material-rebalance.sql را اجرا کنید (به DTL_MANF/VAHEDS و CC_FormulaChange نیاز دارد).");
 
             // --- 21-mogha-anbar-tiebreak-fix.sql ---
-            string moghaAnbarTiebreak = @"
+            string moghaAnbarFix = @"
 /* ═══════════════════════════════════════════════════════════════════
    رفع مغایرت غیرقطعی dbo.MOGHA_ANBAR — تای‌برک آخرین نرخ
 
@@ -6037,6 +6037,21 @@ RETURN (
 
         UNION ALL
 
+        -- ورودی از تبدیل کالا (TAG 30 — انبار و کالای مقصد)
+        --
+        -- ⚠️ برخلاف همه‌ی شاخه‌های بالا، کد کالا از N_RASID می‌آید نه از
+        -- CODE: روی برگه‌ی تبدیل، CODE کالای مبدأ است و کالای مقصد در
+        -- N_RASID نشسته. مقدارش هم MEGH_MAR است، که اینجا «مرجوعی»
+        -- نیست — مقدارِ ورود است (توضیح در 41-item-conversion.sql).
+        SELECT i.N_RASID, SUM(i.MEGH_MAR), SUM(i.MABL_K), CAST(i.ANBARF AS INT)
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+        GROUP BY i.N_RASID, CAST(i.ANBARF AS INT)
+        HAVING CAST(i.ANBARF AS INT) LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
         -- انبارگردانی (ورودی)
         SELECT l.CODE, SUM((l.MOG - l.NUM3) * -1), SUM(ABS(l.MOG - l.NUM3) * l.MABL), a.GRD_ANBAR
         FROM dbo.ANBGRD_LST l INNER JOIN dbo.ANBGRD_HEAD a ON l.GRD_NUM = a.GRD_NUM
@@ -6065,6 +6080,19 @@ RETURN (
         SELECT i.CODE, SUM(i.MEGHk) AS MEG, i.ANBAR
         FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
         WHERE i.TAG IN (2, 5, 8, 10, 11, 26) AND h.DATE_N <= @dt2
+        GROUP BY i.CODE, i.ANBAR
+        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
+        -- خروجی از تبدیل کالا (TAG 30 — انبار و کالای مبدأ)
+        --
+        -- عمداً جدا از فهرست بالا: آن‌جا فرمول MEGHk است و درست هم هست،
+        -- ولی اگر ۳۰ را داخلش می‌گذاشتیم، شاخه‌ی ورودِ بالا هم همان
+        -- ردیف را با CODE مبدأ می‌دید و کالای مبدأ دو بار شمرده می‌شد.
+        SELECT i.CODE, SUM(i.MEGHk), i.ANBAR
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
         GROUP BY i.CODE, i.ANBAR
         HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
 
@@ -6118,6 +6146,19 @@ RETURN (
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG = 5
+
+        UNION ALL
+
+        -- وارده از تبدیل کالا: نرخِ کالای مقصد در AVRAGE2 نشسته، همان‌جا
+        -- که انتقالی هم می‌نشیند. BARGAH از TAGCOD کد ۳۱ می‌آید چون این
+        -- رویداد سمتِ *ورود* است و باید با ورودها مرتب شود، نه با خروجِ
+        -- همان برگه.
+        SELECT i.N_RASID, CAST(i.ANBARF AS INT), i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
+        FROM dbo.INVO_LST i
+             INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+             INNER JOIN dbo.TAGCOD t ON t.CODE = 31
+        WHERE h.DATE_N <= @dt2 AND i.TAG = 30
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL
     ),
     lastav AS (
         SELECT CODE, ANBAR, AVRAGE,
@@ -6170,8 +6211,8 @@ GO
 PRINT N'تابع MOGHA_ANBAR با تای‌برک id DESC بازنویسی شد.';
 GO
 ";
-            TryExecuteCostCloseBatch(db, moghaAnbarTiebreak,
-                "اصلاح tie-break در dbo.MOGHA_ANBAR",
+            TryExecuteCostCloseBatch(db, moghaAnbarFix,
+                "تابع MOGHA_ANBAR",
                 "اسکریپت 21-mogha-anbar-tiebreak-fix.sql را اجرا کنید.");
 
             // --- 22-runstep-attempt-int.sql ---
@@ -8729,11 +8770,17 @@ GO
    اگر نصبی ویو را خودش عوض کرده باشد، دست‌نخورده می‌ماند و اسکریپت
    نامش را چاپ می‌کند تا دستی بررسی شود. ساکت رد نمی‌شود.
 
-   ⚠️ این فهرست کامل نیست. گزارش‌های تاریخ‌دارِ انبار
-   (AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB، MOG_FR_A_sub) و کارت کالا
-   (KA_KH، MOGHA_ANBAR) هنوز TAG=30 را نمی‌شناسند. آنها تعریف‌های
-   بلندتر و متغیرتری دارند و باید جداگانه و با دیدنِ نسخه‌ی همان نصب
-   اصلاح شوند.
+   کارت کالا (KA_KH) هم اینجاست، ولی با روش دیگری: تعریفش بازنویسی
+   نمی‌شود، فقط دو UNION به انتهای بدنه‌اش اضافه می‌شود. کارت کالا بین
+   نصب‌ها ستون‌های متفاوتی دارد و بازنویسیِ کاملش یعنی پاک‌کردنِ
+   تغییراتِ همان شرکت.
+
+   MOGHA_ANBAR اینجا نیست چون خودمان صاحبش هستیم —
+   21-mogha-anbar-tiebreak-fix.sql تعریفش را می‌سازد و شاخه‌های تبدیل
+   همان‌جا اضافه شده‌اند.
+
+   ⚠️ هنوز پوشش داده نشده: AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB و
+   MOG_FR_A_sub — گزارش‌های تاریخ‌دارِ تراز انبار.
 
    نکته: عمداً هیچ «USE <database>» اینجا نیست.
    ═══════════════════════════════════════════════════════════════════ */
@@ -8743,7 +8790,6 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-DECLARE @skipped NVARCHAR(MAX) = N'';
 
 /* ───────── ۱) MOG_FR_SUB — خروج، در سطح کد کالا ───────── */
 
@@ -8754,7 +8800,7 @@ BEGIN
     IF @d1 LIKE '%TAG = 30%'
         PRINT N'MOG_FR_SUB از قبل TAG=30 را می‌شناسد.';
     ELSE IF @d1 NOT LIKE '%TAG = 11%'
-        SET @skipped = @skipped + N'MOG_FR_SUB، ';
+        PRINT N'⚠ MOG_FR_SUB تعریف غیرمنتظره دارد — دست نخورد.';
     ELSE
     BEGIN
         EXEC(N'
@@ -8995,8 +9041,86 @@ RETURN (SELECT CODE, SUM(MEGHk - MEGH_MAR) AS MEG, ANBAR, 0 AS kk
 END
 GO
 
-PRINT N'ویوهای موجودی: TAG=30 بررسی شد.';
-PRINT N'⚠ هنوز پوشش داده نشده: AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB، MOG_FR_A_sub، KA_KH، MOGHA_ANBAR.';
+/* ───────── ۷) KA_KH — کارت کالا ─────────
+
+   این همان چیزی است که کاربر باز می‌کند تا ببیند یک کالا کِی و با چه
+   نرخی آمده و رفته. تا امروز برگه‌ی تبدیل در آن اصلاً ردیفی نداشت —
+   نه در کارتِ کالای مبدأ و نه در کارتِ کالای مقصد.
+
+   دو ردیف اضافه می‌شود، هرکدام از یک سرِ همان یک سطر:
+
+     خروج : انبار و کد مبدأ، مقدار منفی، نرخ = AVRAGE،
+            BEDNAME = نام انبار مقصد («به کجا رفت»)
+     ورود : انبار و کد مقصد، مقدار مثبت، نرخ = MABL_K ÷ MEGH_MAR،
+            BEDNAME = نام انبار مبدأ («از کجا آمد»)
+
+   ⚠️ نرخِ سمت ورود عمداً MABL نیست. MABL نرخِ کالای *مبدأ* است؛ نرخِ
+   کالای مقصد از تقسیم مبلغ بر مقدارِ ورود درمی‌آید. همان الگوی TAG=5
+   که آن هم AVRAGE2 را برای سمت مقصد نشان می‌دهد. */
+
+IF OBJECT_ID('dbo.KA_KH','IF') IS NOT NULL
+BEGIN
+    DECLARE @d7 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.KA_KH'));
+
+    IF @d7 LIKE '%TAG = 30%'
+        PRINT N'KA_KH از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d7 NOT LIKE '%BEDNAME%' OR @d7 NOT LIKE '%TAG = 11%'
+        PRINT N'⚠ KA_KH تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        DECLARE @newKaKh NVARCHAR(MAX) =
+            REPLACE(@d7, 'CREATE FUNCTION', 'ALTER FUNCTION');
+
+        /* آخرین پرانتزِ بسته‌ی بدنه را پیدا می‌کنیم و دو UNION را
+           درست پیش از آن می‌گذاریم. کلِ تعریف بازنویسی نمی‌شود — هرچه
+           این نصب دارد سرِ جایش می‌ماند و فقط دو شاخه اضافه می‌شود.
+           اگر ساختار آن‌قدر فرق داشته باشد که این پرانتز پیدا نشود،
+           دست نمی‌زنیم. */
+        DECLARE @cut INT = LEN(@newKaKh) - CHARINDEX(')', REVERSE(@newKaKh));
+
+        IF @cut <= 0
+            PRINT N'⚠ KA_KH تعریف غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @newKaKh =
+                LEFT(@newKaKh, @cut) + N'
+        UNION
+        /* تبدیل کالا — سمت خروج (کارتِ کالای مبدأ) */
+        SELECT     i.ANBAR, i.CODE, i.MEGHk * -1 AS MEG, i.MABL, i.MABL_K, h.TAG,
+                   i.MEGHk, h.DATE_N, i.NUMBER, ta.NAMES AS BEDNAME, i.AVRAGE, h.FNUMCO,
+                   i.id, ISNULL(i.MANDAH, N''  '') AS mol
+        FROM       dbo.HEAD_LST h
+                   INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+                   LEFT OUTER JOIN dbo.TCOD_ANBAR ta ON ta.CODE = CAST(i.ANBARF AS INT)
+        WHERE      h.TAG = 30
+        UNION
+        /* تبدیل کالا — سمت ورود (کارتِ کالای مقصد) */
+        SELECT     CAST(i.ANBARF AS INT), i.N_RASID, i.MEGH_MAR AS MEG,
+                   CASE WHEN ISNULL(i.MEGH_MAR, 0) = 0 THEN 0 ELSE i.MABL_K / i.MEGH_MAR END,
+                   i.MABL_K, 31 AS TAG,
+                   i.MEGH_MAR, h.DATE_N, i.NUMBER, ta.NAMES AS BEDNAME, i.AVRAGE2, h.FNUMCO,
+                   i.id, ISNULL(i.MANDAH, N''  '') AS mol
+        FROM       dbo.HEAD_LST h
+                   INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+                   LEFT OUTER JOIN dbo.TCOD_ANBAR ta ON ta.CODE = i.ANBAR
+        WHERE      h.TAG = 30 AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL
+   ' + SUBSTRING(@newKaKh, @cut + 1, LEN(@newKaKh));
+
+            BEGIN TRY
+                EXEC sp_executesql @newKaKh;
+                PRINT N'KA_KH به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ KA_KH به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+
+PRINT N'ویوهای موجودی و کارت کالا: TAG=30 بررسی شد.';
+PRINT N'⚠ هنوز پوشش داده نشده: AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB، MOG_FR_A_sub.';
 GO
 ";
             TryExecuteCostCloseBatch(db, legacyViewsTag30,

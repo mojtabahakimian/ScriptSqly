@@ -3689,18 +3689,21 @@ BEGIN
     END
     ELSE IF @DEED_MODE = 2
     BEGIN
+        -- هزینه‌ی منفی فقط از تعدیلِ گِردکردنِ خالصِ منفی می‌آید (پرسنلِ فقط‌بیمه: مبنا
+        -- NET_PAY + TOTAL_DED مثلاً -155). قبلاً «> 0» آن را دور می‌ریخت و سند به اندازه‌ی
+        -- جمعِ این تعدیل‌ها ناتراز می‌شد (اجرای ۴۲ مشتری: 1,028 ریال). حالا بستانکارِ هزینه.
         INSERT INTO #FinalArticles
-        SELECT CAST(@ACC_SALARY_TOLID AS NVARCHAR(100)), CAST(N'هزینه حقوق تولید ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(EXP_TOLID AS BIGINT), CAST(0 AS BIGINT), CAST('EXP_TOLID' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 1
-        FROM #SalarySplit WHERE EXP_TOLID > 0
+        SELECT CAST(@ACC_SALARY_TOLID AS NVARCHAR(100)), CAST(N'هزینه حقوق تولید ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(CASE WHEN EXP_TOLID > 0 THEN EXP_TOLID ELSE 0 END AS BIGINT), CAST(CASE WHEN EXP_TOLID < 0 THEN -EXP_TOLID ELSE 0 END AS BIGINT), CAST('EXP_TOLID' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 1
+        FROM #SalarySplit WHERE EXP_TOLID <> 0
         UNION ALL
-        SELECT CAST(@ACC_SALARY_EDARI AS NVARCHAR(100)), CAST(N'هزینه حقوق اداری ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(EXP_EDARI AS BIGINT), CAST(0 AS BIGINT), CAST('EXP_EDARI' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 2
-        FROM #SalarySplit WHERE EXP_EDARI > 0
+        SELECT CAST(@ACC_SALARY_EDARI AS NVARCHAR(100)), CAST(N'هزینه حقوق اداری ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(CASE WHEN EXP_EDARI > 0 THEN EXP_EDARI ELSE 0 END AS BIGINT), CAST(CASE WHEN EXP_EDARI < 0 THEN -EXP_EDARI ELSE 0 END AS BIGINT), CAST('EXP_EDARI' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 2
+        FROM #SalarySplit WHERE EXP_EDARI <> 0
         UNION ALL
-        SELECT CAST(@ACC_SALARY_FOROSH AS NVARCHAR(100)), CAST(N'هزینه حقوق فروش ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(EXP_FOROSH AS BIGINT), CAST(0 AS BIGINT), CAST('EXP_FOROSH' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 3
-        FROM #SalarySplit WHERE EXP_FOROSH > 0
+        SELECT CAST(@ACC_SALARY_FOROSH AS NVARCHAR(100)), CAST(N'هزینه حقوق فروش ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(CASE WHEN EXP_FOROSH > 0 THEN EXP_FOROSH ELSE 0 END AS BIGINT), CAST(CASE WHEN EXP_FOROSH < 0 THEN -EXP_FOROSH ELSE 0 END AS BIGINT), CAST('EXP_FOROSH' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 3
+        FROM #SalarySplit WHERE EXP_FOROSH <> 0
         UNION ALL
-        SELECT CAST(@ACC_SALARY_KHADAMAT AS NVARCHAR(100)), CAST(N'هزینه حقوق خدمات ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(EXP_KHADAMAT AS BIGINT), CAST(0 AS BIGINT), CAST('EXP_KHADAMAT' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 4
-        FROM #SalarySplit WHERE EXP_KHADAMAT > 0
+        SELECT CAST(@ACC_SALARY_KHADAMAT AS NVARCHAR(100)), CAST(N'هزینه حقوق خدمات ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(CASE WHEN EXP_KHADAMAT > 0 THEN EXP_KHADAMAT ELSE 0 END AS BIGINT), CAST(CASE WHEN EXP_KHADAMAT < 0 THEN -EXP_KHADAMAT ELSE 0 END AS BIGINT), CAST('EXP_KHADAMAT' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 4
+        FROM #SalarySplit WHERE EXP_KHADAMAT <> 0
         UNION ALL
         SELECT CAST(@ACC_INS_EXP AS NVARCHAR(100)), CAST(N'هزینه بیمه کارفرما ' + @ML AS NVARCHAR(500)), CAST(SUM(INS_EMPLOYER) AS BIGINT), CAST(0 AS BIGINT), CAST('INS_EXP' AS NVARCHAR(50)), CAST(NULL AS INT), CAST(NULL AS NVARCHAR(150)), 5
         FROM #SalarySplit HAVING SUM(INS_EMPLOYER) > 0
@@ -3981,13 +3984,18 @@ BEGIN
 
         UNION ALL
         -- (ب) اقلام حکم هر پرسنل روی حساب تفصیلی خودش
+        -- مبلغ منفی فقط از تعدیلِ گِردکردن می‌آید: خالصِ منفی (پرسنلِ فقط‌بیمه) رو به پایین
+        -- گرد می‌شود، مثلاً -24,362,845 → -24,363,000، و تعدیل -155 است. قبلاً «> 0» آن را
+        -- دور می‌ریخت؛ مانده‌ی حساب پرسنل 155 ریال با خالص فرق می‌کرد و سند (هزینه از همین
+        -- اقلام ساخته می‌شود) ناتراز می‌شد — گاردِ آشتی صدور را متوقف می‌کرد. حالا بدهکار می‌شود.
         SELECT CAST(SS.ACC_T AS NVARCHAR(100)),
                CAST(EI.ITEM_NAME + N' ' + @ML + N' | ' + SS.FULL_NAME AS NVARCHAR(500)),
-               CAST(0 AS BIGINT), CAST(EI.AMOUNT AS BIGINT),
+               CAST(CASE WHEN EI.AMOUNT < 0 THEN -EI.AMOUNT ELSE 0 END AS BIGINT),
+               CAST(CASE WHEN EI.AMOUNT > 0 THEN  EI.AMOUNT ELSE 0 END AS BIGINT),
                CAST('EMP_ITEM' AS NVARCHAR(50)), CAST(EI.EMP_ID AS INT), CAST(SS.FULL_NAME AS NVARCHAR(150)), 2
         FROM #EmpItem EI
         INNER JOIN #SalarySplit SS ON SS.EMP_ID = EI.EMP_ID
-        WHERE EI.AMOUNT > 0
+        WHERE EI.AMOUNT <> 0
 
         UNION ALL
         -- (ج) کسورات هر پرسنل: بدهکارِ حساب خودش

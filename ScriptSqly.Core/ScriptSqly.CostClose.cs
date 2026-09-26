@@ -8779,8 +8779,12 @@ GO
    21-mogha-anbar-tiebreak-fix.sql تعریفش را می‌سازد و شاخه‌های تبدیل
    همان‌جا اضافه شده‌اند.
 
-   ⚠️ هنوز پوشش داده نشده: AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB و
-   MOG_FR_A_sub — گزارش‌های تاریخ‌دارِ تراز انبار.
+   گزارش‌های تاریخ‌دارِ تراز انبار (AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB،
+   MOG_FR_A_sub) هم با همان روشِ KA_KH اصلاح می‌شوند — یک شاخه به انتهای
+   بدنه، بدون بازنویسی.
+
+   ⚠️ بیرون از دسترسِ این اسکریپت: نرم‌افزار AUTO_BAZ مخزن دیگری است و
+   هر جا خودش فهرست TAG دارد باید جداگانه به‌روز شود.
 
    نکته: عمداً هیچ «USE <database>» اینجا نیست.
    ═══════════════════════════════════════════════════════════════════ */
@@ -9119,8 +9123,156 @@ END
 GO
 
 
-PRINT N'ویوهای موجودی و کارت کالا: TAG=30 بررسی شد.';
-PRINT N'⚠ هنوز پوشش داده نشده: AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB، MOG_FR_A_sub.';
+/* ───────── ۸ تا ۱۰) گزارش‌های تاریخ‌دارِ تراز انبار ─────────
+
+   AK_MOGO_FR_SUB و AK_MOGO_AVL_KOL_SUB زوجِ خروج/ورودِ فرم تراز انبار
+   هستند و MOG_FR_A_sub سمتِ خروجِ نسخه‌ی دیگرِ همان فرم. هر سه تابعِ
+   جدولیِ درون‌خطی‌اند و بدنه‌شان با یک پرانتزِ بسته تمام می‌شود، پس
+   مثل KA_KH فقط یک شاخه به انتهایشان اضافه می‌شود — تعریفشان بازنویسی
+   نمی‌شود.
+
+   ⚠️ ستونِ سومِ AK_MOGO_FR_SUB در خودِ کدِ اصلی ناهمگون است: شاخه‌ی
+   اصلی AVG(MABL) می‌دهد و شاخه‌ی تعمیر SUM(MABL_K). ما از شاخه‌ی اصلی
+   تقلید می‌کنیم، چون همان است که این تابع را تعریف می‌کند. */
+
+DECLARE @tail NVARCHAR(MAX), @body NVARCHAR(MAX), @cut2 INT;
+
+/* ── ۸) AK_MOGO_FR_SUB — خروج ── */
+IF OBJECT_ID('dbo.AK_MOGO_FR_SUB','IF') IS NOT NULL
+BEGIN
+    SET @body = OBJECT_DEFINITION(OBJECT_ID('dbo.AK_MOGO_FR_SUB'));
+
+    IF @body LIKE '%TAG = 30%'
+        PRINT N'AK_MOGO_FR_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @body NOT LIKE '%@Forms___F_MENU_ANBAR___MANBAR%'
+        PRINT N'⚠ AK_MOGO_FR_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @body = REPLACE(@body, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cut2 = LEN(@body) - CHARINDEX(')', REVERSE(@body));
+
+        IF @cut2 <= 0
+            PRINT N'⚠ AK_MOGO_FR_SUB ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tail = SUBSTRING(@body, @cut2 + 1, LEN(@body));
+            SET @body = LEFT(@body, @cut2) + N'
+   UNION
+   /* تبدیل کالا — سمت خروج (کالا و انبار مبدأ) */
+   SELECT     i.CODE, SUM(i.MEGHk) AS MEG, AVG(i.MABL) AS AvgOfMABL, i.ANBAR, 5 AS kk
+   FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+   WHERE      i.TAG = 30 AND h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
+   GROUP BY   i.CODE, i.ANBAR
+   HAVING     (i.ANBAR LIKE @Forms___F_MENU_ANBAR___MANBAR)
+' + @tail;
+
+            BEGIN TRY
+                EXEC sp_executesql @body;
+                PRINT N'AK_MOGO_FR_SUB به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ AK_MOGO_FR_SUB به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+/* ── ۹) AK_MOGO_AVL_KOL_SUB — ورود ── */
+DECLARE @tail9 NVARCHAR(MAX), @body9 NVARCHAR(MAX), @cut9 INT;
+
+IF OBJECT_ID('dbo.AK_MOGO_AVL_KOL_SUB','IF') IS NOT NULL
+BEGIN
+    SET @body9 = OBJECT_DEFINITION(OBJECT_ID('dbo.AK_MOGO_AVL_KOL_SUB'));
+
+    IF @body9 LIKE '%TAG = 30%'
+        PRINT N'AK_MOGO_AVL_KOL_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @body9 NOT LIKE '%@Forms___F_MENU_ANBAR___MANBAR%'
+        PRINT N'⚠ AK_MOGO_AVL_KOL_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @body9 = REPLACE(@body9, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cut9 = LEN(@body9) - CHARINDEX(')', REVERSE(@body9));
+
+        IF @cut9 <= 0
+            PRINT N'⚠ AK_MOGO_AVL_KOL_SUB ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tail9 = SUBSTRING(@body9, @cut9 + 1, LEN(@body9));
+            SET @body9 = LEFT(@body9, @cut9) + N'
+   UNION
+   /* تبدیل کالا — سمت ورود (کالا و انبار مقصد) */
+   SELECT     i.N_RASID, SUM(i.MEGH_MAR) AS MEG, SUM(i.MABL_K) AS SumOfMABL_K,
+              CAST(i.ANBARF AS INT), 4 AS AA
+   FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+   WHERE      i.TAG = 30 AND h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+   GROUP BY   i.N_RASID, CAST(i.ANBARF AS INT)
+   HAVING     (CAST(i.ANBARF AS INT) LIKE @Forms___F_MENU_ANBAR___MANBAR)
+' + @tail9;
+
+            BEGIN TRY
+                EXEC sp_executesql @body9;
+                PRINT N'AK_MOGO_AVL_KOL_SUB به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ AK_MOGO_AVL_KOL_SUB به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+/* ── ۱۰) MOG_FR_A_sub — خروج، با ارزش ──
+
+   فرمولِ ارزشِ این تابع SUM(AVRAGE*MEGHk - ISNULL(AVRAGE2,0)*MEGH_MAR)
+   است، یعنی مرجوعی را از خروج کم می‌کند. روی برگه‌ی تبدیل MEGH_MAR
+   مرجوعی نیست، پس شاخه‌ی ما فقط AVRAGE*MEGHk را می‌دهد.
+
+   سمتِ ورودِ همین فرم از AK_MOGO_AVL_KOL_SUB می‌آید که بالاتر اصلاح
+   شد. */
+DECLARE @tailA NVARCHAR(MAX), @bodyA NVARCHAR(MAX), @cutA INT;
+
+IF OBJECT_ID('dbo.MOG_FR_A_sub','IF') IS NOT NULL
+BEGIN
+    SET @bodyA = OBJECT_DEFINITION(OBJECT_ID('dbo.MOG_FR_A_sub'));
+
+    IF @bodyA LIKE '%TAG = 30%'
+        PRINT N'MOG_FR_A_sub از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @bodyA NOT LIKE '%@FORMS___F_MENU_ANBAR_TARAZ___DT2%'
+        PRINT N'⚠ MOG_FR_A_sub تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @bodyA = REPLACE(@bodyA, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cutA = LEN(@bodyA) - CHARINDEX(')', REVERSE(@bodyA));
+
+        IF @cutA <= 0
+            PRINT N'⚠ MOG_FR_A_sub ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tailA = SUBSTRING(@bodyA, @cutA + 1, LEN(@bodyA));
+            SET @bodyA = LEFT(@bodyA, @cutA) + N'
+ UNION
+ /* تبدیل کالا — سمت خروج */
+ SELECT     i.ANBAR, i.CODE, SUM(i.MEGHk) AS MEG, SUM(i.AVRAGE * i.MEGHk) AS avgofmabl
+ FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+ WHERE      i.TAG = 30 AND h.DATE_N <= @FORMS___F_MENU_ANBAR_TARAZ___DT2
+ GROUP BY   i.ANBAR, i.CODE
+' + @tailA;
+
+            BEGIN TRY
+                EXEC sp_executesql @bodyA;
+                PRINT N'MOG_FR_A_sub به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ MOG_FR_A_sub به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+PRINT N'ویوهای موجودی، کارت کالا و تراز انبار: TAG=30 بررسی شد.';
 GO
 ";
             TryExecuteCostCloseBatch(db, legacyViewsTag30,

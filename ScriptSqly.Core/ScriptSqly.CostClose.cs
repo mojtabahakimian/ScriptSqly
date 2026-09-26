@@ -8467,52 +8467,52 @@ GO
             // --- 41-item-conversion.sql ---
             string itemConversion = @"
 /* ═══════════════════════════════════════════════════════════════════
-   تبدیل کالا به کالا
+   تبدیل کالا به کالا — برگه‌ی TAG=30
 
    ── چه کاری است ──
    مقداری از یک کالا از انباری خارج می‌شود و کالای *دیگری* به انبار
    دیگری وارد می‌شود: خامه ۲۸٪ می‌رود و خامه ۶۵٪ می‌آید. چیزی تولید
-   نشده و چیزی خریده نشده — فقط همان ارزش، زیر نام دیگری، جای دیگری
-   نشسته است.
+   نشده و چیزی خریده نشده — همان ارزش، زیر نام دیگری، جای دیگری.
 
-   ── امروز چطور انجام می‌شود ──
-   دستی، با دو برگه و یک حساب واسط:
-     ۱. حواله خروج سایر (TAG=11) از انبار مبدأ، به بدهکار حسابِ واسط
-     ۲. رسید خرید (TAG=1) + فاکتور خرید (TAG=12) به انبار مقصد، به
-        بستانکار همان حساب
-   اگر دو مبلغ یکی باشند، حسابِ واسط صفر می‌شود و هیچ سود و زیانی
-   ساخته نمی‌شود. این همان چیزی است که باید بشود.
+   ── چرا برگه‌ی تازه و نه رسید/فاکتور خرید ──
+   تا امروز این کار با یک حواله خروج سایر و یک رسید خرید انجام می‌شد.
+   کار می‌کرد ولی نباید می‌کرد: فاکتور خرید فقط یک سند حسابداری نیست،
+   به گزارش‌های دارایی هم می‌رود. یک جابه‌جاییِ داخلی نباید به شکل خریدِ
+   ساختگی در اظهارنامه بنشیند. پس برگه‌ی خودش را دارد.
 
-   ── چرا نمی‌شود ──
-   نمی‌شود، و روی داده‌ی واقعی هم نشده. روی پایگاه «پودر مروارید»
-   حساب ۷۴۱-۳۰۰۰-۳۰۰۰ («تبدیل») دقیقاً دو آرتیکل دارد:
+   ── ساختار: یک سربرگ، یک سطر ──
+   سربرگ مثل انتقالی است — ANBAR مبدأ، ANBARF مقصد — و *یک* سطر هر دو
+   سر را نگه می‌دارد:
 
-     حواله خروج سایر ۸۱   مورخ ۱۴۰۵/۰۲/۳۱   بدهکار  ۲۶۸٬۱۵۱٬۴۷۶
-     فاکتور خرید    ۱۶۱   مورخ ۱۴۰۵/۰۲/۳۱   بستانکار ۲۷۲٬۹۱۵٬۳۳۱
-     ───────────────────────────────────────────────────────────
-     مانده                                            ۴٬۷۶۳٬۸۵۵
+     CODE      کالای مبدأ        ANBAR     انبار مبدأ
+     MEGHk     مقدار خروج        VAHED_K   واحد کالای مبدأ
+     N_RASID   کالای مقصد        ANBARF    انبار مقصد
+     MEGH_MAR  مقدار ورود
+     MABL_K    ارزش — یکی، برای هر دو سر
+     AVRAGE    میانگین مبدأ پس از خروج
+     AVRAGE2   میانگین مقصد پس از ورود
 
-   چهار میلیون و هفتصد هزار ریال روی حسابی نشسته که باید صفر باشد.
+   دقیقاً همان قراردادی که انتقالی (TAG=5) دارد؛ فقط کد کالا هم عوض
+   می‌شود، پس دو ستونِ بی‌استفاده روی همین سطر آن را حمل می‌کنند.
 
-   علتش هم دقیقاً معلوم است و ربطی به دقتِ کاربر ندارد: بازسازی نرخ
-   میانگین (S07A) ردیف‌های TAG=۱۰/۱۱ را *دوباره قیمت‌گذاری می‌کند* —
-   MABL و MABL_K را با میانگین متحرکِ همان لحظه بازنویسی می‌کند. ولی
-   ردیف TAG=۱ (خرید) را دست نمی‌زند؛ همان عددی می‌ماند که تایپ شده.
-   کاربر نرخ را در لحظه‌ی ثبت از کاردکس می‌خواند و درست هم می‌خواند،
-   ولی تا پایان ماه میانگین جابه‌جا شده است. در همان نمونه:
+   ⚠️ MEGH_MAR اینجا «مقدار مرجوعی» نیست. در ویوهای قدیمیِ موجودی
+   (MOG_FR_SUB و بستگانش) فرمول SUM(MEGHk - MEGH_MAR) فقط روی
+   TAG IN (2,8,10,11,26) اجرا می‌شود و TAG=30 اصلاً داخل آن فهرست
+   نیست — پس این ستون روی این برگه آزاد است. هر شاخه‌ای که بعداً برای
+   TAG=30 به آن ویوها اضافه شود باید *خودش* این را بداند و فقط MEGHk
+   را کم کند.
 
-     نرخ تایپ‌شده در رسید   ۸۲۳٬۲۷۴
-     نرخ نهایی پس از S07A   ۸۰۸٬۹۰۳
-     اختلاف هر کیلو          ۱۴٬۳۷۱
+   ── چرا یک MABL_K و نه دو تا ──
+   چون آن‌وقت نمی‌توانند با هم اختلاف پیدا کنند. روشِ قدیمی دو مبلغ
+   جدا داشت و بازسازی نرخ میانگین فقط یکی‌شان را به‌روز می‌کرد؛ نتیجه
+   روی پایگاه پودر مروارید ۴٬۷۶۰٬۸۷۲ ریال مانده روی حساب واسط بود، از
+   یک تبدیل. با یک ستون، تراز یک خاصیتِ ساختار است نه چیزی که باید
+   نگهبانی شود.
 
-   یعنی این مانده هر بار که تبدیلی ثبت شود دوباره ساخته می‌شود، و
-   هیچ‌کس هم مقصر نیست.
-
-   ── راه‌حل ──
-   دو برگه را به هم گره می‌زنیم و مبلغِ سمت ورود را *مشتق* می‌کنیم، نه
-   تایپ. جدول CC_ItemConversion این گره است. بعد از همگرایی نرخ‌ها، گام
-   S11B مبلغ رسید را از روی مبلغِ نهاییِ حواله می‌نویسد. حساب واسط با
-   ساختار صفر می‌شود، نه با دقتِ تایپ.
+   ── حسابداری ──
+   مستقیم انبار به انبار، عیناً مثل انتقالی: موجودی انبار مبدأ
+   بستانکار، موجودی انبار مقصد بدهکار، هر دو به همان MABL_K. هیچ حساب
+   واسطی درگیر نمی‌شود، پس هیچ مانده‌ای هم نمی‌تواند رویش بماند.
 
    نکته: عمداً هیچ «USE <database>» اینجا نیست.
    ═══════════════════════════════════════════════════════════════════ */
@@ -8522,58 +8522,40 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-/* ───────────────────────── گره‌ی دو برگه ───────────────────────── */
+/* ───────────────────── ثبت نوع برگه در TAGCOD ─────────────────────
 
-IF OBJECT_ID('dbo.CC_ItemConversion','U') IS NULL
-CREATE TABLE dbo.CC_ItemConversion (
-    ConversionId   INT IDENTITY(1,1) PRIMARY KEY,
-    DateN          BIGINT        NOT NULL,
+   ۳۰ خروج است و ۳۱ ورود. سطر ۳۱ هیچ‌وقت در INVO_LST نوشته نمی‌شود —
+   موتور نرخ میانگین آن را از روی همان سطر ۳۰ می‌سازد، عیناً همان‌طور
+   که انتقالیِ ورود (۶) را از انتقالیِ خروج (۵) می‌سازد. ولی باید در
+   TAGCOD باشد، چون tartib آن ترتیبِ پردازشِ سمتِ ورود را در همان روز
+   تعیین می‌کند.
 
-    /* حساب واسط، به شکل کامل «کل-معین-تفصیل» — مثلاً '741-3000-3000'.
-       عمداً متن است و نه سه ستون عددی: همین رشته در HEAD_LST.CUST_NO و
-       INVO_LST.N_RASID می‌نشیند و باید عیناً همان باشد. */
-    AccountCode    NVARCHAR(50)  NOT NULL,
+   tartib از روی همسایه‌های منطقی‌اش انتخاب شده: ورود (۳۱) با انتقالیِ
+   ورود هم‌رتبه است و خروج (۳۰) با انتقالیِ خروج — یعنی در یک روز، اول
+   ورودها و بعد خروج‌ها، همان قاعده‌ای که کارت کالای واقعی دارد.
 
-    FromCode       NVARCHAR(20)  NOT NULL,
-    FromAnbar      INT           NOT NULL,
-    FromQty        FLOAT         NOT NULL,
+   BARGAH عمداً با همان فاصله‌های ابتدایی نوشته می‌شود که بقیه‌ی ردیف‌ها
+   دارند؛ سیستم قدیمی ترتیب را از همین رشته درمی‌آورد. */
 
-    ToCode         NVARCHAR(20)  NOT NULL,
-    ToAnbar        INT           NOT NULL,
-    ToQty          FLOAT         NOT NULL,
-
-    /* شماره‌ی سه برگه‌ای که ساخته شده. FLOAT چون HEAD_LST.NUMBER هم
-       FLOAT است و مقایسه‌ی INT با FLOAT در JOIN، ایندکس را از کار
-       می‌اندازد. */
-    IssueNumber    FLOAT         NOT NULL,   -- TAG=11 حواله خروج سایر
-    ReceiptNumber  FLOAT         NOT NULL,   -- TAG=1  رسید خرید
-    InvoiceNumber  FLOAT         NULL,       -- TAG=12 فاکتور خرید
-
-    /* نرخ و مبلغِ لحظه‌ی ثبت. این‌ها *مرجع نیستند* — مرجع همیشه
-       INVO_LST است. اینجا می‌مانند تا بشود گفت «موقع ثبت چه دیدیم» و
-       اختلافش با مبلغ نهایی را نشان داد. */
-    RateAtEntry    FLOAT         NOT NULL,
-    ValueAtEntry   FLOAT         NOT NULL,
-
-    Note           NVARCHAR(200) NULL,
-    Status         TINYINT       NOT NULL CONSTRAINT DF_CC_ItemConv_Status DEFAULT (1),
-                                             -- 1=فعال  9=ابطال‌شده
-    CreatedBy      NVARCHAR(100) NULL,
-    CreatedAt      DATETIME      NOT NULL CONSTRAINT DF_CC_ItemConv_CreatedAt DEFAULT (GETDATE())
-);
+MERGE dbo.TAGCOD AS t
+USING (VALUES
+    (30, N'تبديل - خروج'),
+    (31, N' تبديل - ورود')
+) AS s (CODE, BARGAH)
+ON t.CODE = s.CODE
+WHEN NOT MATCHED THEN INSERT (CODE, BARGAH) VALUES (s.CODE, s.BARGAH);
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = 'IX_CC_ItemConversion_Date' AND object_id = OBJECT_ID('dbo.CC_ItemConversion'))
-    CREATE INDEX IX_CC_ItemConversion_Date
-        ON dbo.CC_ItemConversion(DateN, Status) INCLUDE (IssueNumber, ReceiptNumber);
+/* tartib فقط وقتی نوشته می‌شود که خالی باشد — همان محافظه‌کاریِ
+   36-tagcod-tartib-seed.sql: ترتیبِ برگه‌ها تصمیمِ هر شرکت است. */
+IF COL_LENGTH('dbo.TAGCOD', 'tartib') IS NOT NULL
+BEGIN
+    UPDATE dbo.TAGCOD SET tartib = 10 WHERE CODE = 31 AND tartib IS NULL;
+    UPDATE dbo.TAGCOD SET tartib = 14 WHERE CODE = 30 AND tartib IS NULL;
+END
 GO
 
-/* ───────────────────── وضعیت زنده‌ی هر تبدیل ─────────────────────
-
-   مبلغ را از خودِ INVO_LST می‌خواند، نه از ValueAtEntry — چون بعد از
-   S07A فقط INVO_LST درست است. Gap همان چیزی است که روی حساب واسط
-   می‌ماند. */
+/* ───────────────────── نمای برگه‌های تبدیل ───────────────────── */
 
 IF OBJECT_ID('dbo.CC_vw_ItemConversion','V') IS NOT NULL
     DROP VIEW dbo.CC_vw_ItemConversion;
@@ -8581,149 +8563,113 @@ GO
 
 CREATE VIEW dbo.CC_vw_ItemConversion
 AS
-SELECT  c.ConversionId,
-        c.DateN,
-        c.AccountCode,
-        c.FromCode,
-        FromName    = sf.NAME,
-        c.FromAnbar,
+SELECT  ConversionId  = i.id,
+        Number        = h.NUMBER,
+        DateN         = h.DATE_N,
+        SanadNo       = h.N_S,
+
+        FromCode      = i.CODE,
+        FromName      = sf.NAME,
+        FromUnit      = vf.NAMES,
+        FromAnbar     = i.ANBAR,
         FromAnbarName = af.NAMES,
-        c.FromQty,
-        c.ToCode,
-        ToName      = st.NAME,
-        c.ToAnbar,
-        ToAnbarName = at.NAMES,
-        c.ToQty,
-        c.IssueNumber,
-        c.ReceiptNumber,
-        c.InvoiceNumber,
-        c.RateAtEntry,
-        c.ValueAtEntry,
+        FromQty       = i.MEGHk,
+        FromRate      = i.MABL,
 
-        IssueValue   = ISNULL(iss.MABL_K, 0),
-        ReceiptValue = ISNULL(rcp.MABL_K, 0),
-        Gap          = ISNULL(iss.MABL_K, 0) - ISNULL(rcp.MABL_K, 0),
+        ToCode        = i.N_RASID,
+        ToName        = st.NAME,
+        ToUnit        = vt.NAMES,
+        ToAnbar       = CAST(i.ANBARF AS INT),
+        ToAnbarName   = at.NAMES,
+        ToQty         = i.MEGH_MAR,
 
-        /* نرخ واحدِ کالای مقصد، از مبلغ نهایی. همان عددی که در کاردکس
-           مقصد می‌نشیند. */
-        ToRate       = CASE WHEN c.ToQty = 0 THEN 0
-                            ELSE ISNULL(iss.MABL_K, 0) / c.ToQty END,
+        /* ارزش یکی است و همان است که هر دو سر می‌گیرند. نرخ مقصد از
+           تقسیمِ همین بر مقدارِ ورود درمی‌آید — تایپ نمی‌شود. */
+        Value         = i.MABL_K,
+        ToRate        = CASE WHEN ISNULL(i.MEGH_MAR, 0) = 0 THEN 0
+                             ELSE i.MABL_K / i.MEGH_MAR END,
 
-        c.Note,
-        c.Status,
-        c.CreatedBy,
-        c.CreatedAt
-FROM    dbo.CC_ItemConversion c
-LEFT    JOIN dbo.STUF_DEF   sf ON sf.CODE  = c.FromCode
-LEFT    JOIN dbo.STUF_DEF   st ON st.CODE  = c.ToCode
-LEFT    JOIN dbo.TCOD_ANBAR af ON af.CODE  = c.FromAnbar
-LEFT    JOIN dbo.TCOD_ANBAR at ON at.CODE  = c.ToAnbar
-OUTER   APPLY (SELECT SUM(i.MABL_K) AS MABL_K FROM dbo.INVO_LST i
-               WHERE i.TAG = 11 AND i.NUMBER = c.IssueNumber) iss
-OUTER   APPLY (SELECT SUM(i.MABL_K) AS MABL_K FROM dbo.INVO_LST i
-               WHERE i.TAG = 1  AND i.NUMBER = c.ReceiptNumber) rcp;
+        FromAverage   = i.AVRAGE,
+        ToAverage     = i.AVRAGE2,
+
+        Note          = h.MOLAH,
+        CreatedBy     = h.USER_NAME,
+        CreatedAt     = h.CRT
+FROM    dbo.INVO_LST i
+INNER   JOIN dbo.HEAD_LST   h  ON h.NUMBER = i.NUMBER AND h.TAG = i.TAG
+LEFT    JOIN dbo.STUF_DEF   sf ON sf.CODE = i.CODE
+LEFT    JOIN dbo.STUF_DEF   st ON st.CODE = i.N_RASID
+LEFT    JOIN dbo.TCOD_VAHEDS vf ON vf.CODE = sf.VAHED
+LEFT    JOIN dbo.TCOD_VAHEDS vt ON vt.CODE = st.VAHED
+LEFT    JOIN dbo.TCOD_ANBAR af ON af.CODE = i.ANBAR
+LEFT    JOIN dbo.TCOD_ANBAR at ON at.CODE = CAST(i.ANBARF AS INT)
+WHERE   i.TAG = 30;
 GO
 
-/* ──────────────── هم‌ترازکردن سمت ورود با سمت خروج ────────────────
+/* ─────────────────────── CHK-24 : برگه‌ی ناقص ───────────────────────
 
-   بعد از اینکه S07A/S11 همگرا شدند، مبلغ حواله دیگر عوض نمی‌شود. آن
-   وقت این رویه مبلغ رسید را *از روی آن* می‌نویسد.
+   با یک سطر، دو سرِ تبدیل نمی‌توانند نامتوازن شوند — ولی می‌توانند
+   *ناقص* باشند: کد کالای مقصد خالی، مقدار ورود صفر، یا کالایی که در
+   STUF_DEF نیست. هر سه یعنی کالا از انبار رفته و هیچ‌جا وارد نشده، و
+   هر سه بی‌صدا هستند اگر کسی نگاهشان نکند.
 
-   ⚠️ MABL (نرخ واحد) هم بازنویسی می‌شود و نه فقط MABL_K: کاردکس مقصد
-   از MABL_K ارزش می‌گیرد ولی گزارش‌های نرخ از MABL می‌خوانند؛ رها
-   کردن یکی از این دو یعنی دو عدد متناقض در دو گزارش.
+   این رویه از S05 صدا زده می‌شود (همان‌جا که بقیه‌ی کنترل‌ها هستند). */
 
-   ⚠️ مقدار (MEGHk) دست نمی‌خورد. تبدیل ممکن است مقدارش عوض شود —
-   ۳۳۱ کیلو خامه ۲۸٪ می‌تواند ۱۴۲ کیلو خامه ۶۵٪ بدهد — و این مقدار
-   واقعیتِ فیزیکی است، نه چیزی که از حسابداری مشتق شود. فقط نرخ عوض
-   می‌شود: نرخ = مبلغِ خروج ÷ مقدارِ ورود. */
-
-IF OBJECT_ID('dbo.CC_sp_ResyncConversions','P') IS NOT NULL
-    DROP PROCEDURE dbo.CC_sp_ResyncConversions;
+IF OBJECT_ID('dbo.CC_sp_CheckConversions','P') IS NOT NULL
+    DROP PROCEDURE dbo.CC_sp_CheckConversions;
 GO
 
-CREATE PROCEDURE dbo.CC_sp_ResyncConversions
-    @RunId INT          = NULL,
+CREATE PROCEDURE dbo.CC_sp_CheckConversions
+    @RunId INT,
     @DT1   BIGINT,
     @DT2   BIGINT
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Changed TABLE (
-        ReceiptNumber FLOAT,
-        ToCode        NVARCHAR(20),
-        OldValue      FLOAT,
-        NewValue      FLOAT
-    );
-
-    ;WITH Target AS (
-        SELECT  v.ConversionId, v.ToCode, v.ToQty, v.ReceiptNumber,
-                v.IssueValue, v.ReceiptValue
-        FROM    dbo.CC_vw_ItemConversion v
-        WHERE   v.Status = 1
-          AND   v.DateN BETWEEN @DT1 AND @DT2
-          /* صفر یعنی حواله هنوز قیمت نخورده — آن را تحمیل نمی‌کنیم،
-             وگرنه کالای مقصد با ارزش صفر وارد انبار می‌شود و همان
-             فاجعه‌ای می‌شود که روی کد ۲۰۲۱ دیدیم. */
-          AND   v.IssueValue <> 0
-          AND   ABS(v.IssueValue - v.ReceiptValue) > 0.5
-    )
-    UPDATE  i
-    SET     i.MABL_K = t.IssueValue,
-            i.MABL   = CASE WHEN t.ToQty = 0 THEN 0 ELSE t.IssueValue / t.ToQty END
-    OUTPUT  INSERTED.NUMBER, INSERTED.CODE, DELETED.MABL_K, INSERTED.MABL_K
-            INTO @Changed (ReceiptNumber, ToCode, OldValue, NewValue)
-    FROM    dbo.INVO_LST i
-    JOIN    Target t ON t.ReceiptNumber = i.NUMBER AND i.TAG = 1 AND i.CODE = t.ToCode;
-
-    /* ─── CHK-24 : تبدیلی که هنوز تراز نشده ───
-
-       بعد از به‌روزرسانی بالا، هر اختلافی که مانده یعنی چیزی غیرعادی
-       است: حواله‌ی صفر، رسیدِ حذف‌شده، یا کالایی که کد مقصدش با برگه
-       نمی‌خواند. همه‌شان باید دیده شوند، چون همه‌شان مانده روی حساب
-       واسط می‌گذارند. */
-    IF @RunId IS NOT NULL
-    BEGIN
-        INSERT dbo.CC_Exception
-            (RunId, StepCode, RuleCode, ExType, Severity, Anbar, Code,
-             DocNumber, DocTag, DocDate, Amount, Description)
-        SELECT  @RunId, 'S11B', 'CHK-24', 26, 1,
-                v.ToAnbar, TRY_CAST(v.ToCode AS BIGINT),
-                CAST(v.IssueNumber AS INT), 11, v.DateN,
-                v.Gap,
-                CONCAT(N'تبدیل ', v.FromName, N' به ', v.ToName,
-                       N' مورخ ', FORMAT(v.DateN, '0000/00/00'),
-                       N': حواله ', CAST(v.IssueNumber AS BIGINT),
-                       N' و رسید ', CAST(v.ReceiptNumber AS BIGINT),
-                       N' هم‌مبلغ نیستند — ',
-                       FORMAT(ABS(v.Gap), 'N0'), N' ریال روی حساب ',
-                       v.AccountCode, N' می‌ماند',
-                       CASE WHEN v.IssueValue = 0
-                            THEN N' (حواله هنوز قیمت نخورده است)'
-                            ELSE N'' END)
-        FROM    dbo.CC_vw_ItemConversion v
-        WHERE   v.Status = 1
-          AND   v.DateN BETWEEN @DT1 AND @DT2
-          AND   ABS(v.Gap) > 0.5
-          AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
-                            WHERE ae.RuleCode = 'CHK-24' AND ae.IsActive = 1
-                              AND (ae.Anbar IS NULL OR ae.Anbar = v.ToAnbar)
-                              AND (ae.Code  IS NULL OR ae.Code  = TRY_CAST(v.ToCode AS BIGINT)));
-    END
-
-    /* کدهای مقصدی که مبلغشان عوض شد — فراخوان باید کاردکس همین‌ها را
-       دوباره بسازد، چون ارزشِ ورودی‌شان تغییر کرده. */
-    SELECT DISTINCT ToCode FROM @Changed;
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, Anbar, Code,
+         DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S05', 'CHK-24', 26, 2,
+            v.FromAnbar, TRY_CAST(v.FromCode AS BIGINT),
+            CAST(v.Number AS INT), 30, v.DateN,
+            v.Value,
+            CONCAT(N'برگه تبدیل ', CAST(v.Number AS BIGINT),
+                   N' مورخ ', FORMAT(v.DateN, '0000/00/00'), N': ',
+                   CASE
+                     WHEN NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
+                          THEN N'کالای مقصد مشخص نشده'
+                     WHEN v.ToName IS NULL
+                          THEN CONCAT(N'کالای مقصد «', v.ToCode, N'» در فهرست کالاها نیست')
+                     WHEN ISNULL(v.ToQty, 0) <= 0
+                          THEN N'مقدار ورود صفر است'
+                     ELSE N'انبار مقصد مشخص نشده'
+                   END,
+                   N' — ', v.FromName, N' از انبار خارج شده و هیچ‌جا وارد نمی‌شود')
+    FROM    dbo.CC_vw_ItemConversion v
+    WHERE   v.DateN BETWEEN @DT1 AND @DT2
+      AND   (NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
+         OR  v.ToName IS NULL
+         OR  ISNULL(v.ToQty, 0) <= 0
+         OR  v.ToAnbar IS NULL)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-24' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL OR ae.Anbar = v.FromAnbar)
+                          AND (ae.Code  IS NULL OR ae.Code  = TRY_CAST(v.FromCode AS BIGINT)));
 END
 GO
 
-/* ───────────────────────── ثبت قاعده ───────────────────────── */
+/* ───────────────────────── ثبت قاعده ─────────────────────────
+
+   مسدودکننده است (Severity=2) و این عمدی است: برخلاف بقیه‌ی کنترل‌ها
+   که گزارشِ وضعیت‌اند، این یکی یعنی موجودی از بین رفته. ادامه‌ی بستن
+   ماه روی آن، یک ماهِ کامل روی عددِ غلط می‌سازد — همان معیاری که برای
+   CHK-01 هست. */
 
 MERGE dbo.CC_CheckRule AS t
 USING (VALUES
- ('CHK-24', N'تبدیل کالا نامتوازن', 'S11B', 26, 1, 0.5,
-  N'مبلغ حواله خروج و رسید ورودِ یک تبدیل باید یکی باشد. اگر حواله قیمت نخورده، اول بازسازی نرخ میانگین را اجرا کنید؛ اگر یکی از دو برگه پاک شده، تبدیل را ابطال و دوباره ثبت کنید.', 240)
+ ('CHK-24', N'برگه تبدیل ناقص', 'S05', 26, 2, NULL,
+  N'کالای مقصد و مقدار ورود را روی برگه تبدیل کامل کنید. تا وقتی مقصد مشخص نباشد، کالای خارج‌شده هیچ‌جا وارد نمی‌شود و موجودی کم می‌ماند.', 240)
 ) AS s (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, Threshold, RemedyText, SortOrder)
 ON t.RuleCode = s.RuleCode
 WHEN MATCHED THEN UPDATE SET
@@ -8736,7 +8682,11 @@ WHEN NOT MATCHED THEN INSERT
             s.Threshold, s.RemedyText, s.SortOrder);
 GO
 
-PRINT N'تبدیل کالا: جدول، نما، رویه و قاعده CHK-24 آماده شد.';
+IF COL_LENGTH('dbo.CC_CheckRule', 'IsBlocking') IS NOT NULL
+    UPDATE dbo.CC_CheckRule SET IsBlocking = 1 WHERE RuleCode = 'CHK-24';
+GO
+
+PRINT N'تبدیل کالا: TAGCOD 30/31، نما، کنترل CHK-24 آماده شد.';
 GO
 ";
             TryExecuteCostCloseBatch(db, itemConversion,

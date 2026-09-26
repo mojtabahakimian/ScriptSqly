@@ -2190,6 +2190,7 @@ BEGIN
 				ON R.CODE = IL.CODE
 		WHERE IL.NUMBER = @NUMBER
 			  AND IL.TAG = @TAG
+			  AND (@TAG <> 24 OR ISNULL(IL.ANBAR, 0) <> 0)
 			  AND ISNULL(IL.JAY, 0) = 0
 			  AND (ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0)) <> 0
 			  AND R.CODE IS NULL;
@@ -2222,7 +2223,8 @@ BEGIN
 
 	SELECT @SumMablk = SUM(ISNULL(MABL_K, 0))
 	FROM dbo.INVO_LST
-	WHERE NUMBER = @NUMBER AND TAG = @TAG;
+	WHERE NUMBER = @NUMBER AND TAG = @TAG
+		  AND (@TAG <> 24 OR ISNULL(ANBAR, 0) <> 0);
 
 	-- تخفیف و ارزش افزوده روی سربرگ «فاکتور فروش» (TAG = 13) می‌نشیند، نه روی سربرگ
 	-- «حواله» (TAG = 2)؛ صدور سند هم از همان سطر می‌خواند. اگر سطر ۱۳ نبود (مسیرهای
@@ -2230,7 +2232,7 @@ BEGIN
 	SELECT TOP (1) @HeadTakhfif = ISNULL(TAKHFIF, 0), @HeadMbaa = ISNULL(MBAA, 0)
 	FROM dbo.HEAD_LST
 	WHERE NUMBER = @NUMBER
-		  AND TAG = CASE WHEN @TAG = 2 THEN 13 ELSE @TAG END;
+		  AND TAG = CASE WHEN @TAG = 2 THEN 13 WHEN @TAG = 24 THEN 25 ELSE @TAG END;
 
 	IF @@ROWCOUNT = 0
 		SELECT TOP (1) @HeadTakhfif = ISNULL(TAKHFIF, 0), @HeadMbaa = ISNULL(MBAA, 0)
@@ -2271,6 +2273,7 @@ BEGIN
 				ON R.CODE = IL.CODE
 		WHERE IL.NUMBER = @NUMBER
 			  AND IL.TAG = @TAG
+			  AND (@TAG <> 24 OR ISNULL(IL.ANBAR, 0) <> 0)
 			  AND ISNULL(IL.JAY, 0) = 0;
 
 		SET @TotalPorsant = ISNULL(@TotalPorsant, 0);
@@ -2294,6 +2297,7 @@ BEGIN
 				ON R.CODE = IL.CODE
 		WHERE IL.NUMBER = @NUMBER
 			  AND IL.TAG = @TAG
+			  AND (@TAG <> 24 OR ISNULL(IL.ANBAR, 0) <> 0)
 			  AND ISNULL(IL.JAY, 0) = 0
 			  AND R.CODE IS NULL;
 

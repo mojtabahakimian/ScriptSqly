@@ -5964,7 +5964,7 @@ GO
                 "اسکریپت 20-material-rebalance.sql را اجرا کنید (به DTL_MANF/VAHEDS و CC_FormulaChange نیاز دارد).");
 
             // --- 21-mogha-anbar-tiebreak-fix.sql ---
-            string moghaAnbarTiebreak = @"
+            string moghaAnbarFix = @"
 /* ═══════════════════════════════════════════════════════════════════
    رفع مغایرت غیرقطعی dbo.MOGHA_ANBAR — تای‌برک آخرین نرخ
 
@@ -6037,6 +6037,21 @@ RETURN (
 
         UNION ALL
 
+        -- ورودی از تبدیل کالا (TAG 30 — انبار و کالای مقصد)
+        --
+        -- ⚠️ برخلاف همه‌ی شاخه‌های بالا، کد کالا از N_RASID می‌آید نه از
+        -- CODE: روی برگه‌ی تبدیل، CODE کالای مبدأ است و کالای مقصد در
+        -- N_RASID نشسته. مقدارش هم MEGH_MAR است، که اینجا «مرجوعی»
+        -- نیست — مقدارِ ورود است (توضیح در 41-item-conversion.sql).
+        SELECT i.N_RASID, SUM(i.MEGH_MAR), SUM(i.MABL_K), CAST(i.ANBARF AS INT)
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+        GROUP BY i.N_RASID, CAST(i.ANBARF AS INT)
+        HAVING CAST(i.ANBARF AS INT) LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
         -- انبارگردانی (ورودی)
         SELECT l.CODE, SUM((l.MOG - l.NUM3) * -1), SUM(ABS(l.MOG - l.NUM3) * l.MABL), a.GRD_ANBAR
         FROM dbo.ANBGRD_LST l INNER JOIN dbo.ANBGRD_HEAD a ON l.GRD_NUM = a.GRD_NUM
@@ -6065,6 +6080,19 @@ RETURN (
         SELECT i.CODE, SUM(i.MEGHk) AS MEG, i.ANBAR
         FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
         WHERE i.TAG IN (2, 5, 8, 10, 11, 26) AND h.DATE_N <= @dt2
+        GROUP BY i.CODE, i.ANBAR
+        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
+        -- خروجی از تبدیل کالا (TAG 30 — انبار و کالای مبدأ)
+        --
+        -- عمداً جدا از فهرست بالا: آن‌جا فرمول MEGHk است و درست هم هست،
+        -- ولی اگر ۳۰ را داخلش می‌گذاشتیم، شاخه‌ی ورودِ بالا هم همان
+        -- ردیف را با CODE مبدأ می‌دید و کالای مبدأ دو بار شمرده می‌شد.
+        SELECT i.CODE, SUM(i.MEGHk), i.ANBAR
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
         GROUP BY i.CODE, i.ANBAR
         HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
 
@@ -6118,6 +6146,19 @@ RETURN (
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG = 5
+
+        UNION ALL
+
+        -- وارده از تبدیل کالا: نرخِ کالای مقصد در AVRAGE2 نشسته، همان‌جا
+        -- که انتقالی هم می‌نشیند. BARGAH از TAGCOD کد ۳۱ می‌آید چون این
+        -- رویداد سمتِ *ورود* است و باید با ورودها مرتب شود، نه با خروجِ
+        -- همان برگه.
+        SELECT i.N_RASID, CAST(i.ANBARF AS INT), i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
+        FROM dbo.INVO_LST i
+             INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+             INNER JOIN dbo.TAGCOD t ON t.CODE = 31
+        WHERE h.DATE_N <= @dt2 AND i.TAG = 30
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL
     ),
     lastav AS (
         SELECT CODE, ANBAR, AVRAGE,
@@ -6170,8 +6211,8 @@ GO
 PRINT N'تابع MOGHA_ANBAR با تای‌برک id DESC بازنویسی شد.';
 GO
 ";
-            TryExecuteCostCloseBatch(db, moghaAnbarTiebreak,
-                "اصلاح tie-break در dbo.MOGHA_ANBAR",
+            TryExecuteCostCloseBatch(db, moghaAnbarFix,
+                "تابع MOGHA_ANBAR",
                 "اسکریپت 21-mogha-anbar-tiebreak-fix.sql را اجرا کنید.");
 
             // --- 22-runstep-attempt-int.sql ---
@@ -6476,6 +6517,7 @@ INSERT INTO @Forms (FormName, Caption) VALUES
     (N'COST_EXCEPTIONS',            N'مغایرت‌های بستن ماه'),
     (N'COST_VARIANCE',              N'تصمیم انحراف'),
     (N'COST_CONVERSION',            N'هزینه تبدیل'),
+    (N'COST_ITEM_CONV',             N'تبدیل کالا به کالا'),
     (N'COST_MARGIN',                N'سود و زیان کالا'),
     (N'COST_HISTORY',               N'سوابق اجراها'),
     (N'COST_SETTINGS',              N'تنظیمات بستن ماه'),
@@ -8463,6 +8505,794 @@ GO
             TryExecuteCostCloseBatch(db, aiKnowledge,
                 "جدول AI_Knowledge",
                 "اسکريپت 40-ai-knowledge.sql را اجرا کنيد.");
+
+            // --- 41-item-conversion.sql ---
+            string itemConversion = @"
+/* ═══════════════════════════════════════════════════════════════════
+   تبدیل کالا به کالا — برگه‌ی TAG=30
+
+   ── چه کاری است ──
+   مقداری از یک کالا از انباری خارج می‌شود و کالای *دیگری* به انبار
+   دیگری وارد می‌شود: خامه ۲۸٪ می‌رود و خامه ۶۵٪ می‌آید. چیزی تولید
+   نشده و چیزی خریده نشده — همان ارزش، زیر نام دیگری، جای دیگری.
+
+   ── چرا برگه‌ی تازه و نه رسید/فاکتور خرید ──
+   تا امروز این کار با یک حواله خروج سایر و یک رسید خرید انجام می‌شد.
+   کار می‌کرد ولی نباید می‌کرد: فاکتور خرید فقط یک سند حسابداری نیست،
+   به گزارش‌های دارایی هم می‌رود. یک جابه‌جاییِ داخلی نباید به شکل خریدِ
+   ساختگی در اظهارنامه بنشیند. پس برگه‌ی خودش را دارد.
+
+   ── ساختار: یک سربرگ، یک سطر ──
+   سربرگ مثل انتقالی است — ANBAR مبدأ، ANBARF مقصد — و *یک* سطر هر دو
+   سر را نگه می‌دارد:
+
+     CODE      کالای مبدأ        ANBAR     انبار مبدأ
+     MEGHk     مقدار خروج        VAHED_K   واحد کالای مبدأ
+     N_RASID   کالای مقصد        ANBARF    انبار مقصد
+     MEGH_MAR  مقدار ورود
+     MABL_K    ارزش — یکی، برای هر دو سر
+     AVRAGE    میانگین مبدأ پس از خروج
+     AVRAGE2   میانگین مقصد پس از ورود
+
+   دقیقاً همان قراردادی که انتقالی (TAG=5) دارد؛ فقط کد کالا هم عوض
+   می‌شود، پس دو ستونِ بی‌استفاده روی همین سطر آن را حمل می‌کنند.
+
+   ⚠️ MEGH_MAR اینجا «مقدار مرجوعی» نیست. در ویوهای قدیمیِ موجودی
+   (MOG_FR_SUB و بستگانش) فرمول SUM(MEGHk - MEGH_MAR) فقط روی
+   TAG IN (2,8,10,11,26) اجرا می‌شود و TAG=30 اصلاً داخل آن فهرست
+   نیست — پس این ستون روی این برگه آزاد است. هر شاخه‌ای که بعداً برای
+   TAG=30 به آن ویوها اضافه شود باید *خودش* این را بداند و فقط MEGHk
+   را کم کند.
+
+   ── چرا یک MABL_K و نه دو تا ──
+   چون آن‌وقت نمی‌توانند با هم اختلاف پیدا کنند. روشِ قدیمی دو مبلغ
+   جدا داشت و بازسازی نرخ میانگین فقط یکی‌شان را به‌روز می‌کرد؛ نتیجه
+   روی پایگاه پودر مروارید ۴٬۷۶۰٬۸۷۲ ریال مانده روی حساب واسط بود، از
+   یک تبدیل. با یک ستون، تراز یک خاصیتِ ساختار است نه چیزی که باید
+   نگهبانی شود.
+
+   ── حسابداری ──
+   مستقیم انبار به انبار، عیناً مثل انتقالی: موجودی انبار مبدأ
+   بستانکار، موجودی انبار مقصد بدهکار، هر دو به همان MABL_K. هیچ حساب
+   واسطی درگیر نمی‌شود، پس هیچ مانده‌ای هم نمی‌تواند رویش بماند.
+
+   نکته: عمداً هیچ «USE <database>» اینجا نیست.
+   ═══════════════════════════════════════════════════════════════════ */
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/* ───────────────────── ثبت نوع برگه در TAGCOD ─────────────────────
+
+   ۳۰ خروج است و ۳۱ ورود. سطر ۳۱ هیچ‌وقت در INVO_LST نوشته نمی‌شود —
+   موتور نرخ میانگین آن را از روی همان سطر ۳۰ می‌سازد، عیناً همان‌طور
+   که انتقالیِ ورود (۶) را از انتقالیِ خروج (۵) می‌سازد. ولی باید در
+   TAGCOD باشد، چون tartib آن ترتیبِ پردازشِ سمتِ ورود را در همان روز
+   تعیین می‌کند.
+
+   tartib از روی همسایه‌های منطقی‌اش انتخاب شده: ورود (۳۱) با انتقالیِ
+   ورود هم‌رتبه است و خروج (۳۰) با انتقالیِ خروج — یعنی در یک روز، اول
+   ورودها و بعد خروج‌ها، همان قاعده‌ای که کارت کالای واقعی دارد.
+
+   BARGAH عمداً با همان فاصله‌های ابتدایی نوشته می‌شود که بقیه‌ی ردیف‌ها
+   دارند؛ سیستم قدیمی ترتیب را از همین رشته درمی‌آورد. */
+
+MERGE dbo.TAGCOD AS t
+USING (VALUES
+    (30, N'تبديل - خروج'),
+    (31, N' تبديل - ورود')
+) AS s (CODE, BARGAH)
+ON t.CODE = s.CODE
+WHEN NOT MATCHED THEN INSERT (CODE, BARGAH) VALUES (s.CODE, s.BARGAH);
+GO
+
+/* tartib فقط وقتی نوشته می‌شود که خالی باشد — همان محافظه‌کاریِ
+   36-tagcod-tartib-seed.sql: ترتیبِ برگه‌ها تصمیمِ هر شرکت است. */
+IF COL_LENGTH('dbo.TAGCOD', 'tartib') IS NOT NULL
+BEGIN
+    UPDATE dbo.TAGCOD SET tartib = 10 WHERE CODE = 31 AND tartib IS NULL;
+    UPDATE dbo.TAGCOD SET tartib = 14 WHERE CODE = 30 AND tartib IS NULL;
+END
+GO
+
+/* ───────────────────── نمای برگه‌های تبدیل ───────────────────── */
+
+IF OBJECT_ID('dbo.CC_vw_ItemConversion','V') IS NOT NULL
+    DROP VIEW dbo.CC_vw_ItemConversion;
+GO
+
+/* ⚠️ LEFT JOIN و نه INNER — عمدی.
+
+   برگه دو تکه دارد: سربرگ (HEAD_LST) و ردیف (INVO_LST). اگر ردیف پاک
+   شود — چه با نرم‌افزار قدیمی، چه با یک اجرای نیمه‌کاره — سربرگ تنها
+   می‌ماند. با INNER JOIN آن سربرگ از چشم این صفحه *ناپدید* می‌شد:
+   نه دیده می‌شد، نه پاک می‌شد، و شماره‌اش هم برای همیشه مصرف شده بود.
+
+   با LEFT JOIN همان سربرگ با ستون‌های خالی ظاهر می‌شود، IsComplete
+   آن false است و کاربر می‌تواند پاکش کند. */
+
+CREATE VIEW dbo.CC_vw_ItemConversion
+AS
+SELECT  ConversionId  = ISNULL(i.id, 0),
+        Number        = h.NUMBER,
+        DateN         = h.DATE_N,
+        SanadNo       = h.N_S,
+
+        FromCode      = i.CODE,
+        FromName      = sf.NAME,
+        FromUnit      = vf.NAMES,
+        FromAnbar     = ISNULL(i.ANBAR, h.ANBAR),
+        FromAnbarName = af.NAMES,
+        FromQty       = ISNULL(i.MEGHk, 0),
+        FromRate      = i.MABL,
+
+        ToCode        = i.N_RASID,
+        ToName        = st.NAME,
+        ToUnit        = vt.NAMES,
+        ToAnbar       = ISNULL(CAST(i.ANBARF AS INT), h.ANBARF),
+        ToAnbarName   = at.NAMES,
+        ToQty         = i.MEGH_MAR,
+
+        /* ارزش یکی است و همان است که هر دو سر می‌گیرند. نرخ مقصد از
+           تقسیمِ همین بر مقدارِ ورود درمی‌آید — تایپ نمی‌شود. */
+        Value         = ISNULL(i.MABL_K, 0),
+        ToRate        = CASE WHEN ISNULL(i.MEGH_MAR, 0) = 0 THEN 0
+                             ELSE i.MABL_K / i.MEGH_MAR END,
+
+        FromAverage   = i.AVRAGE,
+        ToAverage     = i.AVRAGE2,
+
+        Note          = h.MOLAH,
+        CreatedBy     = h.USER_NAME,
+        CreatedAt     = h.CRT
+FROM    dbo.HEAD_LST h
+LEFT    JOIN dbo.INVO_LST   i  ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+LEFT    JOIN dbo.STUF_DEF   sf ON sf.CODE = i.CODE
+LEFT    JOIN dbo.STUF_DEF   st ON st.CODE = i.N_RASID
+LEFT    JOIN dbo.TCOD_VAHEDS vf ON vf.CODE = sf.VAHED
+LEFT    JOIN dbo.TCOD_VAHEDS vt ON vt.CODE = st.VAHED
+LEFT    JOIN dbo.TCOD_ANBAR af ON af.CODE = i.ANBAR
+LEFT    JOIN dbo.TCOD_ANBAR at ON at.CODE = CAST(i.ANBARF AS INT)
+WHERE   h.TAG = 30;
+GO
+
+/* ─────────────────────── CHK-24 : برگه‌ی ناقص ───────────────────────
+
+   با یک سطر، دو سرِ تبدیل نمی‌توانند نامتوازن شوند — ولی می‌توانند
+   *ناقص* باشند: کد کالای مقصد خالی، مقدار ورود صفر، یا کالایی که در
+   STUF_DEF نیست. هر سه یعنی کالا از انبار رفته و هیچ‌جا وارد نشده، و
+   هر سه بی‌صدا هستند اگر کسی نگاهشان نکند.
+
+   این رویه از S05 صدا زده می‌شود (همان‌جا که بقیه‌ی کنترل‌ها هستند). */
+
+IF OBJECT_ID('dbo.CC_sp_CheckConversions','P') IS NOT NULL
+    DROP PROCEDURE dbo.CC_sp_CheckConversions;
+GO
+
+CREATE PROCEDURE dbo.CC_sp_CheckConversions
+    @RunId INT,
+    @DT1   BIGINT,
+    @DT2   BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT dbo.CC_Exception
+        (RunId, StepCode, RuleCode, ExType, Severity, Anbar, Code,
+         DocNumber, DocTag, DocDate, Amount, Description)
+    SELECT  @RunId, 'S05', 'CHK-24', 26, 2,
+            v.FromAnbar, TRY_CAST(v.FromCode AS BIGINT),
+            CAST(v.Number AS INT), 30, v.DateN,
+            v.Value,
+            CONCAT(N'برگه تبدیل ', CAST(v.Number AS BIGINT),
+                   N' مورخ ', FORMAT(v.DateN, '0000/00/00'), N': ',
+                   CASE
+                     WHEN v.FromCode IS NULL
+                          THEN N'سربرگ بدون ردیف است — هیچ کالایی رویش ثبت نشده'
+                     WHEN NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
+                          THEN N'کالای مقصد مشخص نشده'
+                     WHEN v.ToName IS NULL
+                          THEN CONCAT(N'کالای مقصد «', v.ToCode, N'» در فهرست کالاها نیست')
+                     WHEN ISNULL(v.ToQty, 0) <= 0
+                          THEN N'مقدار ورود صفر است'
+                     ELSE N'انبار مقصد مشخص نشده'
+                   END,
+                   CASE WHEN v.FromCode IS NULL THEN N''
+                        ELSE CONCAT(N' — ', v.FromName, N' از انبار خارج شده و هیچ‌جا وارد نمی‌شود')
+                   END)
+    FROM    dbo.CC_vw_ItemConversion v
+    WHERE   v.DateN BETWEEN @DT1 AND @DT2
+      AND   (v.FromCode IS NULL
+         OR  NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
+         OR  v.ToName IS NULL
+         OR  ISNULL(v.ToQty, 0) <= 0
+         OR  v.ToAnbar IS NULL)
+      AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
+                        WHERE ae.RuleCode = 'CHK-24' AND ae.IsActive = 1
+                          AND (ae.Anbar IS NULL OR ae.Anbar = v.FromAnbar)
+                          AND (ae.Code  IS NULL OR ae.Code  = TRY_CAST(v.FromCode AS BIGINT)));
+END
+GO
+
+/* ───────────────────────── ثبت قاعده ─────────────────────────
+
+   مسدودکننده است (Severity=2) و این عمدی است: برخلاف بقیه‌ی کنترل‌ها
+   که گزارشِ وضعیت‌اند، این یکی یعنی موجودی از بین رفته. ادامه‌ی بستن
+   ماه روی آن، یک ماهِ کامل روی عددِ غلط می‌سازد — همان معیاری که برای
+   CHK-01 هست. */
+
+MERGE dbo.CC_CheckRule AS t
+USING (VALUES
+ ('CHK-24', N'برگه تبدیل ناقص', 'S05', 26, 2, NULL,
+  N'کالای مقصد و مقدار ورود را روی برگه تبدیل کامل کنید. تا وقتی مقصد مشخص نباشد، کالای خارج‌شده هیچ‌جا وارد نمی‌شود و موجودی کم می‌ماند.', 240)
+) AS s (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, Threshold, RemedyText, SortOrder)
+ON t.RuleCode = s.RuleCode
+WHEN MATCHED THEN UPDATE SET
+    t.RuleName = s.RuleName, t.StepCode = s.StepCode, t.ExType = s.ExType,
+    t.DefaultSeverity = s.DefaultSeverity, t.Threshold = s.Threshold,
+    t.RemedyText = s.RemedyText, t.SortOrder = s.SortOrder
+WHEN NOT MATCHED THEN INSERT
+    (RuleCode, RuleName, StepCode, ExType, DefaultSeverity, Threshold, RemedyText, SortOrder)
+    VALUES (s.RuleCode, s.RuleName, s.StepCode, s.ExType, s.DefaultSeverity,
+            s.Threshold, s.RemedyText, s.SortOrder);
+GO
+
+IF COL_LENGTH('dbo.CC_CheckRule', 'IsBlocking') IS NOT NULL
+    UPDATE dbo.CC_CheckRule SET IsBlocking = 1 WHERE RuleCode = 'CHK-24';
+GO
+
+PRINT N'تبدیل کالا: TAGCOD 30/31، نما، کنترل CHK-24 آماده شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, itemConversion,
+                "تبديل کالا به کالا",
+                "اسکريپت 41-item-conversion.sql را اجرا کنيد.");
+
+            // --- 42-legacy-views-tag30.sql ---
+            string legacyViewsTag30 = @"
+/* ═══════════════════════════════════════════════════════════════════
+   یاد دادن TAG=30 (تبدیل کالا) به ویوهای قدیمیِ موجودی
+
+   ── مسئله ──
+   موجودی در این پایگاه از یک خانواده ویو و تابع درمی‌آید که فهرستِ
+   نوع برگه‌ها را *هاردکد* دارند:
+
+     خروج :  TAG = 2 OR 5 OR 8 OR 10 OR 11 OR 26
+     ورود  :  TAG = 1 OR 7 OR 9 OR 24
+     ورودِ انتقالی : TAG = 5، گروه‌بندی روی ANBARF
+
+   برگه‌ی تبدیل (۳۰) در هیچ‌کدام نیست، پس تا امروز نه از انبار مبدأ کم
+   می‌شود و نه به انبار مقصد اضافه — از نظر این گزارش‌ها اصلاً اتفاق
+   نیفتاده است.
+
+   ── چرا شاخه‌ی جدا و نه اضافه‌کردن ۳۰ به همان فهرست‌ها ──
+   چون فرمولِ آن شاخه‌ها SUM(MEGHk - MEGH_MAR) است و روی برگه‌ی تبدیل،
+   MEGH_MAR «مقدار مرجوعی» نیست — مقدارِ ورودِ کالای مقصد است. اگر ۳۰
+   را داخل همان فهرست بیندازیم، خروجِ کالای مبدأ به‌اندازه‌ی مقدارِ
+   ورودِ کالای مقصد کم گزارش می‌شود. بی‌صدا و در همه‌ی گزارش‌ها.
+
+   پس هر شیء دو شاخه‌ی تازه می‌گیرد:
+     خروج : TAG = 30، گروه روی (CODE، ANBAR)،  مقدار = MEGHk
+     ورود : TAG = 30، گروه روی (N_RASID، ANBARF)، مقدار = MEGH_MAR
+
+   ── محافظه‌کاری ──
+   این اسکریپت ویوهای شرکت را بازنویسی می‌کند، و ویوها بین نصب‌ها فرق
+   دارند. پس هر کدام فقط وقتی دست می‌خورد که:
+     ۱. قبلاً TAG=30 را نداشته باشد (اجرای دوباره بی‌اثر است)، و
+     ۲. تعریفِ فعلی‌اش همان امضای شناخته‌شده را داشته باشد.
+   اگر نصبی ویو را خودش عوض کرده باشد، دست‌نخورده می‌ماند و اسکریپت
+   نامش را چاپ می‌کند تا دستی بررسی شود. ساکت رد نمی‌شود.
+
+   کارت کالا (KA_KH) هم اینجاست، ولی با روش دیگری: تعریفش بازنویسی
+   نمی‌شود، فقط دو UNION به انتهای بدنه‌اش اضافه می‌شود. کارت کالا بین
+   نصب‌ها ستون‌های متفاوتی دارد و بازنویسیِ کاملش یعنی پاک‌کردنِ
+   تغییراتِ همان شرکت.
+
+   MOGHA_ANBAR اینجا نیست چون خودمان صاحبش هستیم —
+   21-mogha-anbar-tiebreak-fix.sql تعریفش را می‌سازد و شاخه‌های تبدیل
+   همان‌جا اضافه شده‌اند.
+
+   گزارش‌های تاریخ‌دارِ تراز انبار (AK_MOGO_FR_SUB، AK_MOGO_AVL_KOL_SUB،
+   MOG_FR_A_sub) هم با همان روشِ KA_KH اصلاح می‌شوند — یک شاخه به انتهای
+   بدنه، بدون بازنویسی.
+
+   ⚠️ بیرون از دسترسِ این اسکریپت: نرم‌افزار AUTO_BAZ مخزن دیگری است و
+   هر جا خودش فهرست TAG دارد باید جداگانه به‌روز شود.
+
+   نکته: عمداً هیچ «USE <database>» اینجا نیست.
+   ═══════════════════════════════════════════════════════════════════ */
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+/* ───────── ۱) MOG_FR_SUB — خروج، در سطح کد کالا ───────── */
+
+IF OBJECT_ID('dbo.MOG_FR_SUB','V') IS NOT NULL
+BEGIN
+    DECLARE @d1 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.MOG_FR_SUB'));
+
+    IF @d1 LIKE '%TAG = 30%'
+        PRINT N'MOG_FR_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d1 NOT LIKE '%TAG = 11%'
+        PRINT N'⚠ MOG_FR_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER VIEW [dbo].[MOG_FR_SUB]
+AS
+SELECT     CODE, SUM(MEGHk - MEGH_MAR) AS MEG, SUM((MEGHk - MEGH_MAR) * AVRAGE) AS SumOfMABL_K
+FROM         dbo.INVO_LST
+WHERE     (TAG = 2) OR (TAG = 8) OR (TAG = 10) OR (TAG = 11) OR (TAG = 26)
+GROUP BY CODE
+UNION
+/* تبدیل کالا — سمت خروج. MEGH_MAR اینجا مقدارِ ورودِ کالای مقصد است،
+   پس عمداً کم نمی‌شود. */
+SELECT     CODE, SUM(MEGHk) AS MEG, SUM(MEGHk * AVRAGE) AS SumOfMABL_K
+FROM         dbo.INVO_LST
+WHERE     TAG = 30
+GROUP BY CODE
+UNION
+SELECT     dbo.ANBGRD_LST.CODE, SUM((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3)) AS MEG, SUM(dbo.ANBGRD_LST.MABL) AS mablk
+FROM         dbo.ANBGRD_LST INNER JOIN
+                      dbo.ANBGRD_HEAD ON dbo.ANBGRD_LST.GRD_NUM = dbo.ANBGRD_HEAD.GRD_NUM
+WHERE     (NOT (dbo.ANBGRD_HEAD.N_S IS NULL)) AND ((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) > 0)
+GROUP BY dbo.ANBGRD_LST.CODE');
+        PRINT N'MOG_FR_SUB به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۲) MOGO_AVL_KOL_SUB — ورود، در سطح کد کالا ───────── */
+
+IF OBJECT_ID('dbo.MOGO_AVL_KOL_SUB','V') IS NOT NULL
+BEGIN
+    DECLARE @d2 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.MOGO_AVL_KOL_SUB'));
+
+    IF @d2 LIKE '%TAG = 30%'
+        PRINT N'MOGO_AVL_KOL_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d2 NOT LIKE '%TAG = 24%'
+        PRINT N'⚠ MOGO_AVL_KOL_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER VIEW [dbo].[MOGO_AVL_KOL_SUB]
+AS
+SELECT     CODE, SUM(MOGODI_A) AS MEG, SUM(MABL_A) AS SumOfMABL_A, 0 AS AA
+FROM         dbo.STUF_FSK
+GROUP BY CODE
+UNION
+SELECT     CODE, SUM(MEGHk - MEGH_MAR) AS MEG, SUM(MABL_K) AS SumOfMABL_K, 1 AS AA
+FROM         dbo.INVO_LST
+WHERE     (TAG = 1) OR (TAG = 7) OR (TAG = 9) OR (TAG = 24)
+GROUP BY CODE
+UNION
+SELECT     CODE, SUM(MEGHk) AS MEG, SUM(MABL_K) AS SumOfMABL_K, 1 AS AA
+FROM         dbo.INVO_LST
+WHERE     (TAG = 22)
+GROUP BY CODE
+UNION
+/* تبدیل کالا — سمت ورود. کد کالای مقصد در N_RASID و مقدارش در
+   MEGH_MAR است؛ ارزشش همان MABL_K است چون یک مبلغ برای هر دو سر. */
+SELECT     N_RASID, SUM(MEGH_MAR) AS MEG, SUM(MABL_K) AS SumOfMABL_K, 3 AS AA
+FROM         dbo.INVO_LST
+WHERE     TAG = 30 AND N_RASID IS NOT NULL AND MEGH_MAR > 0
+GROUP BY N_RASID
+UNION
+SELECT     dbo.ANBGRD_LST.CODE, (dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) * - 1 AS MEG, 0 AS mabl, 2 AS aa
+FROM         dbo.ANBGRD_LST INNER JOIN
+                      dbo.ANBGRD_HEAD ON dbo.ANBGRD_LST.GRD_NUM = dbo.ANBGRD_HEAD.GRD_NUM
+WHERE     ((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) * - 1 > 0) AND (dbo.ANBGRD_HEAD.N_S IS NOT NULL)');
+        PRINT N'MOGO_AVL_KOL_SUB به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۳) B_MOG_FR_sub — خروج، در سطح انبار ───────── */
+
+IF OBJECT_ID('dbo.B_MOG_FR_sub','V') IS NOT NULL
+BEGIN
+    DECLARE @d3 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.B_MOG_FR_sub'));
+
+    IF @d3 LIKE '%TAG = 30%'
+        PRINT N'B_MOG_FR_sub از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d3 NOT LIKE '%TAG = 11%'
+        PRINT N'⚠ B_MOG_FR_sub تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER VIEW [dbo].[B_MOG_FR_sub]
+AS
+SELECT     CODE, SUM(MEGHk - MEGH_MAR) AS MEG, ANBAR
+FROM         dbo.INVO_LST
+WHERE     (TAG = 2) OR (TAG = 5) OR (TAG = 8) OR (TAG = 10) OR (TAG = 11) OR (TAG = 26)
+GROUP BY ANBAR, CODE
+UNION
+SELECT     CODE, SUM(MEGHk) AS MEG, ANBAR
+FROM         dbo.INVO_LST
+WHERE     TAG = 30
+GROUP BY ANBAR, CODE
+UNION
+SELECT     dbo.ANBGRD_LST.CODE, (dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) AS MEG, dbo.ANBGRD_HEAD.GRD_ANBAR AS anbar
+FROM         dbo.ANBGRD_LST INNER JOIN
+                      dbo.ANBGRD_HEAD ON dbo.ANBGRD_LST.GRD_NUM = dbo.ANBGRD_HEAD.GRD_NUM
+WHERE     ((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) >= 0 AND (NOT (dbo.ANBGRD_HEAD.N_S IS NULL)))');
+        PRINT N'B_MOG_FR_sub به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۴) B_MOG_KOL_SUB — ورود، در سطح انبار ───────── */
+
+IF OBJECT_ID('dbo.B_MOG_KOL_SUB','V') IS NOT NULL
+BEGIN
+    DECLARE @d4 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.B_MOG_KOL_SUB'));
+
+    IF @d4 LIKE '%TAG = 30%'
+        PRINT N'B_MOG_KOL_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d4 NOT LIKE '%TAG = 24%'
+        PRINT N'⚠ B_MOG_KOL_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER VIEW [dbo].[B_MOG_KOL_SUB]
+AS
+SELECT     ANBAR, CODE, SUM(MEGHk - MEGH_MAR) AS MEG, 0 AS AA
+FROM         dbo.INVO_LST
+WHERE     (TAG = 1) OR (TAG = 7) OR (TAG = 9) OR (TAG = 24)
+GROUP BY ANBAR, CODE
+UNION
+SELECT     ANBAR, CODE, SUM(MOGODI_A) AS MEG, 1 AS AA
+FROM         dbo.STUF_FSK
+GROUP BY ANBAR, CODE
+UNION
+SELECT     ANBARF, CODE, SUM(MEGHk - MEGH_MAR) AS MEG, 2 AS AA
+FROM         dbo.INVO_LST
+WHERE     (TAG = 5)
+GROUP BY ANBARF, CODE
+UNION
+SELECT     ANBAR, CODE, SUM(MEGH_MAR) AS MEG, 0 AS AA
+FROM         dbo.INVO_LST
+WHERE     (TAG = 22)
+GROUP BY ANBAR, CODE
+UNION
+/* تبدیل کالا — سمت ورود: انبار مقصد، کد مقصد، مقدارِ ورود. */
+SELECT     CAST(ANBARF AS INT), N_RASID, SUM(MEGH_MAR) AS MEG, 3 AS AA
+FROM         dbo.INVO_LST
+WHERE     TAG = 30 AND N_RASID IS NOT NULL AND ANBARF IS NOT NULL AND MEGH_MAR > 0
+GROUP BY CAST(ANBARF AS INT), N_RASID');
+        PRINT N'B_MOG_KOL_SUB به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۵) mogudi_1 — ورودِ یک انبار ───────── */
+
+IF OBJECT_ID('dbo.mogudi_1','IF') IS NOT NULL
+BEGIN
+    DECLARE @d5 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.mogudi_1'));
+
+    IF @d5 LIKE '%TAG = 30%'
+        PRINT N'mogudi_1 از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d5 NOT LIKE '%TAG = 24%'
+        PRINT N'⚠ mogudi_1 تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER FUNCTION [dbo].[mogudi_1] (@Forms___F_MENU_ANBAR___MANBAR int)
+RETURNS TABLE
+AS
+RETURN ( SELECT CODE, SUM(MOGODI_A) AS MEG, ANBAR, 0 AS AA
+ FROM dbo.STUF_FSK GROUP BY CODE, ANBAR
+ HAVING (ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT CODE, SUM(MEGHk - MEGH_MAR) AS MEG, ANBAR, 1 AS AA
+ FROM dbo.INVO_LST
+ WHERE (TAG = 1) OR (TAG = 7) OR (TAG = 9) OR (TAG = 24)
+ GROUP BY CODE, ANBAR HAVING (ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT CODE, SUM(MEGH_MAR) AS MEG, ANBAR, 1 AS AA
+ FROM dbo.INVO_LST WHERE (TAG = 22)
+ GROUP BY CODE, ANBAR HAVING (ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT CODE, SUM(MEGHk - MEGH_MAR) AS MEG, ANBARF, 2 AS AA
+ FROM dbo.INVO_LST WHERE (TAG = 5)
+ GROUP BY CODE, ANBARF HAVING (ANBARF = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT N_RASID, SUM(MEGH_MAR) AS MEG, CAST(ANBARF AS INT), 4 AS AA
+ FROM dbo.INVO_LST
+ WHERE TAG = 30 AND N_RASID IS NOT NULL AND MEGH_MAR > 0
+ GROUP BY N_RASID, CAST(ANBARF AS INT)
+ HAVING (CAST(ANBARF AS INT) = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT dbo.ANBGRD_LST.CODE, SUM((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) * - 1) AS MEG, dbo.ANBGRD_HEAD.GRD_ANBAR AS anbar, 3 AS AA
+ FROM dbo.ANBGRD_LST INNER JOIN dbo.ANBGRD_HEAD ON dbo.ANBGRD_LST.GRD_NUM = dbo.ANBGRD_HEAD.GRD_NUM
+ WHERE (NOT (dbo.ANBGRD_HEAD.N_S IS NULL)) AND (dbo.ANBGRD_HEAD.GRD_ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ GROUP BY dbo.ANBGRD_LST.CODE, dbo.ANBGRD_HEAD.GRD_ANBAR
+ HAVING (SUM((dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) * - 1) >= 0) )');
+        PRINT N'mogudi_1 به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۶) mogudi_2 — خروجِ یک انبار ───────── */
+
+IF OBJECT_ID('dbo.mogudi_2','IF') IS NOT NULL
+BEGIN
+    DECLARE @d6 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.mogudi_2'));
+
+    IF @d6 LIKE '%TAG = 30%'
+        PRINT N'mogudi_2 از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d6 NOT LIKE '%TAG = 11%'
+        PRINT N'⚠ mogudi_2 تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        EXEC(N'
+ALTER FUNCTION [dbo].[mogudi_2] (@Forms___F_MENU_ANBAR___MANBAR int)
+RETURNS TABLE
+AS
+RETURN (SELECT CODE, SUM(MEGHk - MEGH_MAR) AS MEG, ANBAR, 0 AS kk
+ FROM dbo.INVO_LST
+ WHERE (TAG = 2 OR TAG = 5 OR TAG = 8 OR TAG = 10 OR TAG = 11 OR TAG = 26)
+ GROUP BY CODE, ANBAR HAVING (ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT CODE, SUM(MEGHk) AS MEG, ANBAR, 2 AS kk
+ FROM dbo.INVO_LST WHERE TAG = 30
+ GROUP BY CODE, ANBAR HAVING (ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ UNION
+ SELECT dbo.ANBGRD_LST.CODE, SUM(dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) AS MEG, dbo.ANBGRD_HEAD.GRD_ANBAR, 1 AS kk
+ FROM dbo.ANBGRD_LST INNER JOIN dbo.ANBGRD_HEAD ON dbo.ANBGRD_LST.GRD_NUM = dbo.ANBGRD_HEAD.GRD_NUM
+ WHERE (NOT (dbo.ANBGRD_HEAD.N_S IS NULL)) AND (dbo.ANBGRD_HEAD.GRD_ANBAR = @Forms___F_MENU_ANBAR___MANBAR)
+ GROUP BY dbo.ANBGRD_LST.CODE, dbo.ANBGRD_HEAD.GRD_ANBAR
+ HAVING (SUM(dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM3) > 0)
+ UNION
+ SELECT dbo.INVO_LST.CODE, SUM(dbo.INVO_LST.MEGHk) AS MEG, dbo.INVO_LST.ANBAR, 4 AS AA
+ FROM dbo.HEAD_LST INNER JOIN dbo.INVO_LST ON dbo.HEAD_LST.TAG = dbo.INVO_LST.TAG AND dbo.HEAD_LST.NUMBER = dbo.INVO_LST.NUMBER
+ WHERE (dbo.INVO_LST.TAG = 20) AND (dbo.HEAD_LST.TAMIR = 1)
+ GROUP BY dbo.INVO_LST.CODE, dbo.INVO_LST.ANBAR
+ HAVING (dbo.INVO_LST.ANBAR = @Forms___F_MENU_ANBAR___MANBAR) )');
+        PRINT N'mogudi_2 به‌روز شد.';
+    END
+END
+GO
+
+/* ───────── ۷) KA_KH — کارت کالا ─────────
+
+   این همان چیزی است که کاربر باز می‌کند تا ببیند یک کالا کِی و با چه
+   نرخی آمده و رفته. تا امروز برگه‌ی تبدیل در آن اصلاً ردیفی نداشت —
+   نه در کارتِ کالای مبدأ و نه در کارتِ کالای مقصد.
+
+   دو ردیف اضافه می‌شود، هرکدام از یک سرِ همان یک سطر:
+
+     خروج : انبار و کد مبدأ، مقدار منفی، نرخ = AVRAGE،
+            BEDNAME = نام انبار مقصد («به کجا رفت»)
+     ورود : انبار و کد مقصد، مقدار مثبت، نرخ = MABL_K ÷ MEGH_MAR،
+            BEDNAME = نام انبار مبدأ («از کجا آمد»)
+
+   ⚠️ نرخِ سمت ورود عمداً MABL نیست. MABL نرخِ کالای *مبدأ* است؛ نرخِ
+   کالای مقصد از تقسیم مبلغ بر مقدارِ ورود درمی‌آید. همان الگوی TAG=5
+   که آن هم AVRAGE2 را برای سمت مقصد نشان می‌دهد. */
+
+IF OBJECT_ID('dbo.KA_KH','IF') IS NOT NULL
+BEGIN
+    DECLARE @d7 NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('dbo.KA_KH'));
+
+    IF @d7 LIKE '%TAG = 30%'
+        PRINT N'KA_KH از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @d7 NOT LIKE '%BEDNAME%' OR @d7 NOT LIKE '%TAG = 11%'
+        PRINT N'⚠ KA_KH تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        DECLARE @newKaKh NVARCHAR(MAX) =
+            REPLACE(@d7, 'CREATE FUNCTION', 'ALTER FUNCTION');
+
+        /* آخرین پرانتزِ بسته‌ی بدنه را پیدا می‌کنیم و دو UNION را
+           درست پیش از آن می‌گذاریم. کلِ تعریف بازنویسی نمی‌شود — هرچه
+           این نصب دارد سرِ جایش می‌ماند و فقط دو شاخه اضافه می‌شود.
+           اگر ساختار آن‌قدر فرق داشته باشد که این پرانتز پیدا نشود،
+           دست نمی‌زنیم. */
+        DECLARE @cut INT = LEN(@newKaKh) - CHARINDEX(')', REVERSE(@newKaKh));
+
+        IF @cut <= 0
+            PRINT N'⚠ KA_KH تعریف غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @newKaKh =
+                LEFT(@newKaKh, @cut) + N'
+        UNION
+        /* تبدیل کالا — سمت خروج (کارتِ کالای مبدأ) */
+        SELECT     i.ANBAR, i.CODE, i.MEGHk * -1 AS MEG, i.MABL, i.MABL_K, h.TAG,
+                   i.MEGHk, h.DATE_N, i.NUMBER, ta.NAMES AS BEDNAME, i.AVRAGE, h.FNUMCO,
+                   i.id, ISNULL(i.MANDAH, N''  '') AS mol
+        FROM       dbo.HEAD_LST h
+                   INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+                   LEFT OUTER JOIN dbo.TCOD_ANBAR ta ON ta.CODE = CAST(i.ANBARF AS INT)
+        WHERE      h.TAG = 30
+        UNION
+        /* تبدیل کالا — سمت ورود (کارتِ کالای مقصد) */
+        SELECT     CAST(i.ANBARF AS INT), i.N_RASID, i.MEGH_MAR AS MEG,
+                   CASE WHEN ISNULL(i.MEGH_MAR, 0) = 0 THEN 0 ELSE i.MABL_K / i.MEGH_MAR END,
+                   i.MABL_K, 31 AS TAG,
+                   i.MEGH_MAR, h.DATE_N, i.NUMBER, ta.NAMES AS BEDNAME, i.AVRAGE2, h.FNUMCO,
+                   i.id, ISNULL(i.MANDAH, N''  '') AS mol
+        FROM       dbo.HEAD_LST h
+                   INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+                   LEFT OUTER JOIN dbo.TCOD_ANBAR ta ON ta.CODE = i.ANBAR
+        WHERE      h.TAG = 30 AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL
+   ' + SUBSTRING(@newKaKh, @cut + 1, LEN(@newKaKh));
+
+            BEGIN TRY
+                EXEC sp_executesql @newKaKh;
+                PRINT N'KA_KH به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ KA_KH به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+
+/* ───────── ۸ تا ۱۰) گزارش‌های تاریخ‌دارِ تراز انبار ─────────
+
+   AK_MOGO_FR_SUB و AK_MOGO_AVL_KOL_SUB زوجِ خروج/ورودِ فرم تراز انبار
+   هستند و MOG_FR_A_sub سمتِ خروجِ نسخه‌ی دیگرِ همان فرم. هر سه تابعِ
+   جدولیِ درون‌خطی‌اند و بدنه‌شان با یک پرانتزِ بسته تمام می‌شود، پس
+   مثل KA_KH فقط یک شاخه به انتهایشان اضافه می‌شود — تعریفشان بازنویسی
+   نمی‌شود.
+
+   ⚠️ ستونِ سومِ AK_MOGO_FR_SUB در خودِ کدِ اصلی ناهمگون است: شاخه‌ی
+   اصلی AVG(MABL) می‌دهد و شاخه‌ی تعمیر SUM(MABL_K). ما از شاخه‌ی اصلی
+   تقلید می‌کنیم، چون همان است که این تابع را تعریف می‌کند. */
+
+DECLARE @tail NVARCHAR(MAX), @body NVARCHAR(MAX), @cut2 INT;
+
+/* ── ۸) AK_MOGO_FR_SUB — خروج ── */
+IF OBJECT_ID('dbo.AK_MOGO_FR_SUB','IF') IS NOT NULL
+BEGIN
+    SET @body = OBJECT_DEFINITION(OBJECT_ID('dbo.AK_MOGO_FR_SUB'));
+
+    IF @body LIKE '%TAG = 30%'
+        PRINT N'AK_MOGO_FR_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @body NOT LIKE '%@Forms___F_MENU_ANBAR___MANBAR%'
+        PRINT N'⚠ AK_MOGO_FR_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @body = REPLACE(@body, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cut2 = LEN(@body) - CHARINDEX(')', REVERSE(@body));
+
+        IF @cut2 <= 0
+            PRINT N'⚠ AK_MOGO_FR_SUB ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tail = SUBSTRING(@body, @cut2 + 1, LEN(@body));
+            SET @body = LEFT(@body, @cut2) + N'
+   UNION
+   /* تبدیل کالا — سمت خروج (کالا و انبار مبدأ) */
+   SELECT     i.CODE, SUM(i.MEGHk) AS MEG, AVG(i.MABL) AS AvgOfMABL, i.ANBAR, 5 AS kk
+   FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+   WHERE      i.TAG = 30 AND h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
+   GROUP BY   i.CODE, i.ANBAR
+   HAVING     (i.ANBAR LIKE @Forms___F_MENU_ANBAR___MANBAR)
+' + @tail;
+
+            BEGIN TRY
+                EXEC sp_executesql @body;
+                PRINT N'AK_MOGO_FR_SUB به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ AK_MOGO_FR_SUB به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+/* ── ۹) AK_MOGO_AVL_KOL_SUB — ورود ── */
+DECLARE @tail9 NVARCHAR(MAX), @body9 NVARCHAR(MAX), @cut9 INT;
+
+IF OBJECT_ID('dbo.AK_MOGO_AVL_KOL_SUB','IF') IS NOT NULL
+BEGIN
+    SET @body9 = OBJECT_DEFINITION(OBJECT_ID('dbo.AK_MOGO_AVL_KOL_SUB'));
+
+    IF @body9 LIKE '%TAG = 30%'
+        PRINT N'AK_MOGO_AVL_KOL_SUB از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @body9 NOT LIKE '%@Forms___F_MENU_ANBAR___MANBAR%'
+        PRINT N'⚠ AK_MOGO_AVL_KOL_SUB تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @body9 = REPLACE(@body9, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cut9 = LEN(@body9) - CHARINDEX(')', REVERSE(@body9));
+
+        IF @cut9 <= 0
+            PRINT N'⚠ AK_MOGO_AVL_KOL_SUB ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tail9 = SUBSTRING(@body9, @cut9 + 1, LEN(@body9));
+            SET @body9 = LEFT(@body9, @cut9) + N'
+   UNION
+   /* تبدیل کالا — سمت ورود (کالا و انبار مقصد) */
+   SELECT     i.N_RASID, SUM(i.MEGH_MAR) AS MEG, SUM(i.MABL_K) AS SumOfMABL_K,
+              CAST(i.ANBARF AS INT), 4 AS AA
+   FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+   WHERE      i.TAG = 30 AND h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+   GROUP BY   i.N_RASID, CAST(i.ANBARF AS INT)
+   HAVING     (CAST(i.ANBARF AS INT) LIKE @Forms___F_MENU_ANBAR___MANBAR)
+' + @tail9;
+
+            BEGIN TRY
+                EXEC sp_executesql @body9;
+                PRINT N'AK_MOGO_AVL_KOL_SUB به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ AK_MOGO_AVL_KOL_SUB به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+/* ── ۱۰) MOG_FR_A_sub — خروج، با ارزش ──
+
+   فرمولِ ارزشِ این تابع SUM(AVRAGE*MEGHk - ISNULL(AVRAGE2,0)*MEGH_MAR)
+   است، یعنی مرجوعی را از خروج کم می‌کند. روی برگه‌ی تبدیل MEGH_MAR
+   مرجوعی نیست، پس شاخه‌ی ما فقط AVRAGE*MEGHk را می‌دهد.
+
+   سمتِ ورودِ همین فرم از AK_MOGO_AVL_KOL_SUB می‌آید که بالاتر اصلاح
+   شد. */
+DECLARE @tailA NVARCHAR(MAX), @bodyA NVARCHAR(MAX), @cutA INT;
+
+IF OBJECT_ID('dbo.MOG_FR_A_sub','IF') IS NOT NULL
+BEGIN
+    SET @bodyA = OBJECT_DEFINITION(OBJECT_ID('dbo.MOG_FR_A_sub'));
+
+    IF @bodyA LIKE '%TAG = 30%'
+        PRINT N'MOG_FR_A_sub از قبل TAG=30 را می‌شناسد.';
+    ELSE IF @bodyA NOT LIKE '%@FORMS___F_MENU_ANBAR_TARAZ___DT2%'
+        PRINT N'⚠ MOG_FR_A_sub تعریف غیرمنتظره دارد — دست نخورد.';
+    ELSE
+    BEGIN
+        SET @bodyA = REPLACE(@bodyA, 'CREATE FUNCTION', 'ALTER FUNCTION');
+        SET @cutA = LEN(@bodyA) - CHARINDEX(')', REVERSE(@bodyA));
+
+        IF @cutA <= 0
+            PRINT N'⚠ MOG_FR_A_sub ساختار غیرمنتظره دارد — دست نخورد.';
+        ELSE
+        BEGIN
+            SET @tailA = SUBSTRING(@bodyA, @cutA + 1, LEN(@bodyA));
+            SET @bodyA = LEFT(@bodyA, @cutA) + N'
+ UNION
+ /* تبدیل کالا — سمت خروج */
+ SELECT     i.ANBAR, i.CODE, SUM(i.MEGHk) AS MEG, SUM(i.AVRAGE * i.MEGHk) AS avgofmabl
+ FROM       dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+ WHERE      i.TAG = 30 AND h.DATE_N <= @FORMS___F_MENU_ANBAR_TARAZ___DT2
+ GROUP BY   i.ANBAR, i.CODE
+' + @tailA;
+
+            BEGIN TRY
+                EXEC sp_executesql @bodyA;
+                PRINT N'MOG_FR_A_sub به‌روز شد.';
+            END TRY
+            BEGIN CATCH
+                PRINT N'⚠ MOG_FR_A_sub به‌روز نشد: ' + ERROR_MESSAGE();
+            END CATCH
+        END
+    END
+END
+GO
+
+PRINT N'ویوهای موجودی، کارت کالا و تراز انبار: TAG=30 بررسی شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, legacyViewsTag30,
+                "ويوهاي موجودي - TAG=30",
+                "اسکريپت 42-legacy-views-tag30.sql را اجرا کنيد.");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

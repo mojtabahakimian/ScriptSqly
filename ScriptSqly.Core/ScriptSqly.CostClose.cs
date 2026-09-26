@@ -8603,9 +8603,19 @@ IF OBJECT_ID('dbo.CC_vw_ItemConversion','V') IS NOT NULL
     DROP VIEW dbo.CC_vw_ItemConversion;
 GO
 
+/* ⚠️ LEFT JOIN و نه INNER — عمدی.
+
+   برگه دو تکه دارد: سربرگ (HEAD_LST) و ردیف (INVO_LST). اگر ردیف پاک
+   شود — چه با نرم‌افزار قدیمی، چه با یک اجرای نیمه‌کاره — سربرگ تنها
+   می‌ماند. با INNER JOIN آن سربرگ از چشم این صفحه *ناپدید* می‌شد:
+   نه دیده می‌شد، نه پاک می‌شد، و شماره‌اش هم برای همیشه مصرف شده بود.
+
+   با LEFT JOIN همان سربرگ با ستون‌های خالی ظاهر می‌شود، IsComplete
+   آن false است و کاربر می‌تواند پاکش کند. */
+
 CREATE VIEW dbo.CC_vw_ItemConversion
 AS
-SELECT  ConversionId  = i.id,
+SELECT  ConversionId  = ISNULL(i.id, 0),
         Number        = h.NUMBER,
         DateN         = h.DATE_N,
         SanadNo       = h.N_S,
@@ -8613,21 +8623,21 @@ SELECT  ConversionId  = i.id,
         FromCode      = i.CODE,
         FromName      = sf.NAME,
         FromUnit      = vf.NAMES,
-        FromAnbar     = i.ANBAR,
+        FromAnbar     = ISNULL(i.ANBAR, h.ANBAR),
         FromAnbarName = af.NAMES,
-        FromQty       = i.MEGHk,
+        FromQty       = ISNULL(i.MEGHk, 0),
         FromRate      = i.MABL,
 
         ToCode        = i.N_RASID,
         ToName        = st.NAME,
         ToUnit        = vt.NAMES,
-        ToAnbar       = CAST(i.ANBARF AS INT),
+        ToAnbar       = ISNULL(CAST(i.ANBARF AS INT), h.ANBARF),
         ToAnbarName   = at.NAMES,
         ToQty         = i.MEGH_MAR,
 
         /* ارزش یکی است و همان است که هر دو سر می‌گیرند. نرخ مقصد از
            تقسیمِ همین بر مقدارِ ورود درمی‌آید — تایپ نمی‌شود. */
-        Value         = i.MABL_K,
+        Value         = ISNULL(i.MABL_K, 0),
         ToRate        = CASE WHEN ISNULL(i.MEGH_MAR, 0) = 0 THEN 0
                              ELSE i.MABL_K / i.MEGH_MAR END,
 
@@ -8637,15 +8647,15 @@ SELECT  ConversionId  = i.id,
         Note          = h.MOLAH,
         CreatedBy     = h.USER_NAME,
         CreatedAt     = h.CRT
-FROM    dbo.INVO_LST i
-INNER   JOIN dbo.HEAD_LST   h  ON h.NUMBER = i.NUMBER AND h.TAG = i.TAG
+FROM    dbo.HEAD_LST h
+LEFT    JOIN dbo.INVO_LST   i  ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
 LEFT    JOIN dbo.STUF_DEF   sf ON sf.CODE = i.CODE
 LEFT    JOIN dbo.STUF_DEF   st ON st.CODE = i.N_RASID
 LEFT    JOIN dbo.TCOD_VAHEDS vf ON vf.CODE = sf.VAHED
 LEFT    JOIN dbo.TCOD_VAHEDS vt ON vt.CODE = st.VAHED
 LEFT    JOIN dbo.TCOD_ANBAR af ON af.CODE = i.ANBAR
 LEFT    JOIN dbo.TCOD_ANBAR at ON at.CODE = CAST(i.ANBARF AS INT)
-WHERE   i.TAG = 30;
+WHERE   h.TAG = 30;
 GO
 
 /* ─────────────────────── CHK-24 : برگه‌ی ناقص ───────────────────────
@@ -8679,6 +8689,8 @@ BEGIN
             CONCAT(N'برگه تبدیل ', CAST(v.Number AS BIGINT),
                    N' مورخ ', FORMAT(v.DateN, '0000/00/00'), N': ',
                    CASE
+                     WHEN v.FromCode IS NULL
+                          THEN N'سربرگ بدون ردیف است — هیچ کالایی رویش ثبت نشده'
                      WHEN NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
                           THEN N'کالای مقصد مشخص نشده'
                      WHEN v.ToName IS NULL
@@ -8687,10 +8699,13 @@ BEGIN
                           THEN N'مقدار ورود صفر است'
                      ELSE N'انبار مقصد مشخص نشده'
                    END,
-                   N' — ', v.FromName, N' از انبار خارج شده و هیچ‌جا وارد نمی‌شود')
+                   CASE WHEN v.FromCode IS NULL THEN N''
+                        ELSE CONCAT(N' — ', v.FromName, N' از انبار خارج شده و هیچ‌جا وارد نمی‌شود')
+                   END)
     FROM    dbo.CC_vw_ItemConversion v
     WHERE   v.DateN BETWEEN @DT1 AND @DT2
-      AND   (NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
+      AND   (v.FromCode IS NULL
+         OR  NULLIF(LTRIM(RTRIM(ISNULL(v.ToCode, N''))), N'') IS NULL
          OR  v.ToName IS NULL
          OR  ISNULL(v.ToQty, 0) <= 0
          OR  v.ToAnbar IS NULL)

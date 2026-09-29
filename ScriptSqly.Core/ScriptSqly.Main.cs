@@ -3713,6 +3713,12 @@ RETURN (
                     #endregion
                 }
 
+                //دسترسی «تغییر پورسانت فاکتور فروش امضاشده»
+                if (isCustomCall)
+                {
+                    SignedPorsantPermissionScript(db);
+                }
+
                 //1405/03/05
                 if (isCustomCall)
                 {

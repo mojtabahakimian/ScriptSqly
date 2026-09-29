@@ -1280,6 +1280,38 @@ IF NOT EXISTS(SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY=N'INS_TOTL_SUBJECT_PLU
                     Console.WriteLine($"PAY2 INS_TOTL_SUBJECT_PLUS_CHILD seed failed: {ex.Message}");
                 }
 
+                // پیوند دوره‌ی حقوق به سندِ حسابداری با DEED_HED.base (ثابت) به‌جای N_S. WPF در
+                // بازشماره‌گذاریِ اسناد N_S را عوض می‌کند و PAY2_PERIOD جزو فرزندهای cascadeش نیست؛
+                // «لغو صدور» سندِ حقوق را پاک نمی‌کرد و بازصدور سندِ دوم می‌ساخت. عمداً جدا از بلوک
+                // تراکنشیِ پایین (همان درسِ INS_TOTL_SUBJECT_PLUS_CHILD). تکرارش بی‌خطر است.
+                // مو‌به‌مو یکی با Server/Database/pay2_deed_link_migration.sql
+                try
+                {
+                    ExecuteBatches(db, @"
+IF COL_LENGTH('dbo.PAY2_PERIOD', 'DEED_BASE') IS NULL
+    ALTER TABLE dbo.PAY2_PERIOD ADD DEED_BASE INT NULL;
+GO
+
+-- فقط پیوندهایی که همین حالا معتبرند (سندی با همان شماره هست و عنوانش سندِ حقوقِ همین دوره
+-- است) به base تبدیل می‌شوند. پیوندهای کهنه/سندهای یتیم را صدورِ بعدی با عنوان پیدا می‌کند.
+-- دیتابیسِ فقط‌حقوق (بدون DEED_HED) چیزی برای وصل کردن ندارد.
+IF OBJECT_ID('dbo.DEED_HED') IS NOT NULL
+BEGIN
+    UPDATE p SET p.DEED_BASE = h.base
+    FROM dbo.PAY2_PERIOD p
+    JOIN dbo.DEED_HED h ON h.N_S = p.DEED_N_S_PAY
+    WHERE p.DEED_BASE IS NULL
+      AND p.DEED_N_S_PAY > 0
+      AND h.SHARH_S = N'سند حقوق و دستمزد دوره ' + CAST(p.PERIOD_DATE AS NVARCHAR(20));
+END
+GO
+");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"PAY2 DEED_BASE link migration failed: {ex.Message}");
+                }
+
                 // ===========================================================
                 // 2. Schema Updates (Idempotent)
                 // ===========================================================

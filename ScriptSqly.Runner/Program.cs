@@ -87,14 +87,10 @@ namespace ScriptSqly.Runner
                 Console.WriteLine($"Starting migration at: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 Console.WriteLine($"Target Database: {MaskConnectionString(connectionString)}");
                 Console.WriteLine($"Parameters: isCustomCall={isCustomCall}, _type_={type}");
-                Console.WriteLine("Executing ScriptSqly.LetsGo ...");
+                Console.WriteLine("Executing ScriptSqly.RunTracked ...");
 
-                ScriptSqly.Migrations.ScriptSqly.LetsGo(connectionString, isCustomCall, type);
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("✅ Database migration completed successfully!");
-                Console.ResetColor();
-                return 0;
+                var result = ScriptSqly.Migrations.ScriptSqly.RunTracked(connectionString, isCustomCall, type);
+                return ReportMigrationResult(result);
             }
             catch (Exception ex)
             {
@@ -107,6 +103,29 @@ namespace ScriptSqly.Runner
                 }
                 Console.ResetColor();
                 return 2;
+            }
+        }
+
+        private static int ReportMigrationResult(MigrationExecutionResult result)
+        {
+            Console.ForegroundColor = result.Success ? ConsoleColor.Green : ConsoleColor.Red;
+            try
+            {
+                Console.WriteLine(result.Success
+                    ? "✅ Database migration completed successfully!"
+                    : "❌ ERROR: Database migration failed!");
+                Console.WriteLine($"Executed: {result.Executed}; skipped: {result.Skipped}; failed: {result.Errors.Count}");
+                foreach (var failure in result.Errors)
+                {
+                    Console.WriteLine($"Step: {failure.Command}");
+                    var error = failure.ErrorNumber > 0 ? $"SQL error {failure.ErrorNumber}" : "Error";
+                    Console.WriteLine($"{error}: {failure.Message}");
+                }
+                return result.Success ? 0 : 2;
+            }
+            finally
+            {
+                Console.ResetColor();
             }
         }
 

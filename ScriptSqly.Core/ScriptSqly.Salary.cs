@@ -1265,7 +1265,7 @@ GO
                 // مو‌به‌مو یکی با Server/Database/pay2_ins_list_total_option.sql
                 try
                 {
-                    db.Execute(@"
+                    ExecuteMigration(db, @"
 -- ستون «جمع دستمزد و مزایای مشمول و غیرمشمول» لیست و دیسکت بیمه. پیش‌فرض خاموش (کل دستمزد و مزایا).
 -- روشن: اقلام غیرمشمول به‌جز حق اولاد از این ستون کنار می‌روند (مثل نرم‌افزار قبلی)؛ مازاد سقف می‌ماند.
 -- فقط نمایش لیست را عوض می‌کند، نه محاسبه‌ی حق بیمه را.
@@ -1371,7 +1371,7 @@ GO
                 FROM sys.check_constraints WHERE OBJECT_NAME(parent_object_id) IN ('PAY2_DECREE_LINE', 'PAY2_OVERRIDE', 'PAY2_ITEM_TMPL_LINE') AND definition LIKE '%BASIS_OV%' AND definition NOT LIKE '%(3)%';
                 IF LEN(@sql) > 0 EXEC sp_executesql @sql;
                 ";
-                db.Execute(schemaUpdates);
+                ExecuteMigration(db, schemaUpdates);
 
                 // نصب زیرساخت Preview/Apply سنوات؛ بدون هیچ اعمال خودکار روی احکام.
                 ExecuteBatchesTransactional(db, @"SET XACT_ABORT ON;
@@ -3334,11 +3334,11 @@ GO
 ";
                 ExecuteBatches(db, modify1);
 
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'POSTAL_CODE') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'POSTAL_CODE') IS NULL
                     ALTER TABLE [dbo].[PAY2_WORKSHOP] ADD [POSTAL_CODE] NVARCHAR(20) NULL;");
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'EMPLOYER_NAME') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'EMPLOYER_NAME') IS NULL
                     ALTER TABLE [dbo].[PAY2_WORKSHOP] ADD [EMPLOYER_NAME] NVARCHAR(100) NULL;");
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'PROVINCE') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'PROVINCE') IS NULL
                     ALTER TABLE [dbo].[PAY2_WORKSHOP] ADD
                         [PROVINCE] NVARCHAR(50) NULL,
                         [CITY] NVARCHAR(50) NULL,
@@ -3348,23 +3348,23 @@ GO
                         [ADMIN_MANAGER] NVARCHAR(100) NULL;");
 
                 //-- ساخت ایندکس ترکیبی برای حذف عملیات سورت و اسکن جدول شغل‌ها
-                db.Execute(@"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PAY2_JOB_PERFORMANCE')
+                ExecuteMigration(db, @"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PAY2_JOB_PERFORMANCE')
                     CREATE NONCLUSTERED INDEX IX_PAY2_JOB_PERFORMANCE ON [dbo].[PAY2_JOB] ([IS_ACTIVE], [JOB_NAME]) INCLUDE ([JOB_ID]);");
 
                 // Migration 009: افزودن تنظیمات حق شیفت به تفکیک کارگاه و پرسنل
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'SHIFT_MODE') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'SHIFT_MODE') IS NULL
                     ALTER TABLE [dbo].[PAY2_WORKSHOP] ADD [SHIFT_MODE] NVARCHAR(10) NULL CONSTRAINT [CK_WS_SHIFT_MODE] CHECK ([SHIFT_MODE] IN ('PCT','FIXED'));");
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_DECREE', 'SHIFT_MODE') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_DECREE', 'SHIFT_MODE') IS NULL
                     ALTER TABLE [dbo].[PAY2_DECREE] ADD [SHIFT_MODE] NVARCHAR(10) NULL CONSTRAINT [CK_DEC_SHIFT_MODE] CHECK ([SHIFT_MODE] IN ('PCT','FIXED'));");
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_DECREE_LINE', 'SHIFT_MODE_OV') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_DECREE_LINE', 'SHIFT_MODE_OV') IS NULL
                     ALTER TABLE [dbo].[PAY2_DECREE_LINE] ADD [SHIFT_MODE_OV] NVARCHAR(10) NULL CONSTRAINT [CK_DL_SHIFT_MODE_OV] CHECK ([SHIFT_MODE_OV] IN ('PCT','FIXED'));");
-                db.Execute(@"IF COL_LENGTH('dbo.PAY2_ITEM_TMPL_LINE', 'SHIFT_MODE_OV') IS NULL
+                ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_ITEM_TMPL_LINE', 'SHIFT_MODE_OV') IS NULL
                     ALTER TABLE [dbo].[PAY2_ITEM_TMPL_LINE] ADD [SHIFT_MODE_OV] NVARCHAR(10) NULL CONSTRAINT [CK_TL_SHIFT_MODE_OV] CHECK ([SHIFT_MODE_OV] IN ('PCT','FIXED'));");
 
                 // Migration 010: افزودن فیلدهای مربوط به روش صدور سند (Dual Deed Modes)
                 try
                 {
-                    db.Execute(@"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'DEFAULT_DEED_MODE') IS NULL
+                    ExecuteMigration(db, @"IF COL_LENGTH('dbo.PAY2_WORKSHOP', 'DEFAULT_DEED_MODE') IS NULL
                         ALTER TABLE [dbo].[PAY2_WORKSHOP] ADD [DEFAULT_DEED_MODE] TINYINT NOT NULL CONSTRAINT DF_WS_DEED_MODE DEFAULT(1);");
                 }
                 catch (Exception ex)
@@ -3374,7 +3374,7 @@ GO
 
                 try
                 {
-                    db.Execute(@"
+                    ExecuteMigration(db, @"
                     IF COL_LENGTH('dbo.PAY2_RUN', 'DEED_MODE') IS NULL
                         ALTER TABLE [dbo].[PAY2_RUN] ADD [DEED_MODE] TINYINT NULL;
 
@@ -3392,7 +3392,7 @@ GO
                     //-- ================================================================
                     //-- ۱.۵ FN_PAY2_ACC_PARENT — برداشتن آخرین سطح یک کد حساب
                     //-- ================================================================
-                    db.Execute(@"
+                    ExecuteMigration(db, @"
 CREATE OR ALTER FUNCTION [dbo].[FN_PAY2_ACC_PARENT](@CODE NVARCHAR(50))
 RETURNS NVARCHAR(50)
 AS
@@ -3414,7 +3414,7 @@ END;");
                     //-- ================================================================
                     //-- ۲. SP_PAY2_GEN_DEED — تولید سند حسابداری حقوق و بیمه
                     //-- ================================================================
-                    db.Execute(@"
+                    ExecuteMigration(db, @"
 CREATE OR ALTER PROCEDURE [dbo].[SP_PAY2_GEN_DEED]
     @RUN_ID  INT,
     @CALC_BY INT = NULL,

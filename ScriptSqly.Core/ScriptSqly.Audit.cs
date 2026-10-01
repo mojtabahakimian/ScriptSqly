@@ -62,7 +62,7 @@ namespace ScriptSqly.Migrations
             {
                 // هر دستور جدا، چون یک شکست (مثلاً نبود دسترسی) نباید بقیه را
                 // متوقف کند.
-                try { db.Execute(sql, commandTimeout: 180); } catch { }
+                try { ExecuteMigration(db, sql, commandTimeout: 180); } catch { }
             }
         }
 

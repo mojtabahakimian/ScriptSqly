@@ -40,7 +40,7 @@ END CATCH;";
 
         public static void AmvalArchiveScript(SqlConnection db, bool previewOnly = false)
         {
-            db.Execute(AmvalArchiveSql, new { PREVIEW_ONLY = previewOnly });
+            ExecuteMigration(db, AmvalArchiveSql, new { PREVIEW_ONLY = previewOnly });
         }
     }
 }

@@ -15,7 +15,7 @@ namespace ScriptSqly.Migrations
         /// </summary>
         private static void SignedPorsantPermissionScript(SqlConnection db)
         {
-            db.Execute(
+            ExecuteMigration(db, 
                 @"IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
                      AND NOT EXISTS (SELECT 1 FROM [dbo].[TFORMS] WHERE FORMNAME = N'FROOSH_PORSANT_SGN')
                   BEGIN
@@ -28,7 +28,7 @@ namespace ScriptSqly.Migrations
                               GETDATE());
                   END");
 
-            db.Execute(
+            ExecuteMigration(db, 
                 @"IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
                      AND OBJECT_ID(N'[dbo].[SAL_CHEK]', N'U') IS NOT NULL
                      AND OBJECT_ID(N'[dbo].[SALA_DTL]', N'U') IS NOT NULL

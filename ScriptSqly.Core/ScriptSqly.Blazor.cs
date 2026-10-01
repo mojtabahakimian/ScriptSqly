@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Data;
@@ -12,7 +12,7 @@ namespace ScriptSqly.Migrations
         private static void BlazorDbScriptUpdate(SqlConnection db)
         {
             //ذخیره اطلاعات پیش فرض کاربران سمت سرور
-            try { db.Execute(@"CREATE TABLE [dbo].[UserState](
+            try { ExecuteMigration(db, @"CREATE TABLE [dbo].[UserState](
 								       [UserId]   INT            NOT NULL PRIMARY KEY,
 								       [StateJson] NVARCHAR(MAX) NOT NULL
 								   );"); } catch { }

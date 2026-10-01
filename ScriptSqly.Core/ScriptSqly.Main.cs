@@ -61,12 +61,12 @@ namespace ScriptSqly.Migrations
                 if (isCustomCall)
                 {
                     AmvalArchiveScript(db);
-                    try { db.Execute("ALTER TABLE dbo.OTHER_DTL ALTER COLUMN TOZIH NVARCHAR(1000) NULL"); } catch { } //اضافه کردن توضیحات بیشتر به Ctrl + G سایر اطلاعا حواله انبار فروش
+                    try { ExecuteMigration(db, "ALTER TABLE dbo.OTHER_DTL ALTER COLUMN TOZIH NVARCHAR(1000) NULL"); } catch { } //اضافه کردن توضیحات بیشتر به Ctrl + G سایر اطلاعا حواله انبار فروش
 
                     //نوع ارز سطرهای خزانه و سند ; در هر اجرا بررسی میشود چون فرم خزانه بدون این ستون کار نمیکند
                     foreach (var ARZKIND2_TABLE in new[] { "PGET_LST", "TR_PGET_LST", "DEED_DTL" })
                     {
-                        try { db.Execute($@"IF COL_LENGTH('dbo.{ARZKIND2_TABLE}', 'ARZKIND2') IS NULL ALTER TABLE [dbo].[{ARZKIND2_TABLE}] ADD [ARZKIND2] [bigint] NULL"); } catch { }
+                        try { ExecuteMigration(db, $@"IF COL_LENGTH('dbo.{ARZKIND2_TABLE}', 'ARZKIND2') IS NULL ALTER TABLE [dbo].[{ARZKIND2_TABLE}] ADD [ARZKIND2] [bigint] NULL"); } catch { }
                     }
 
                     SequentialKeyContentionScript(db);
@@ -74,7 +74,7 @@ namespace ScriptSqly.Migrations
 
                     try
                     {
-                        db.Execute(@"IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[OSTAN_RPT]') AND type in (N'U'))
+                        ExecuteMigration(db, @"IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[OSTAN_RPT]') AND type in (N'U'))
                                  BEGIN
                                      CREATE TABLE [dbo].[OSTAN_RPT] ( 
                                          ID INT IDENTITY(1, 1) PRIMARY KEY, 
@@ -90,14 +90,14 @@ namespace ScriptSqly.Migrations
 
                     // Prevent truncation errors when saving longer truck plate/description values.
                     // NOTE: keep this idempotent; if the column already has a larger size the command is harmless.
-                    try { db.Execute("ALTER TABLE dbo.OTHER_DTL ALTER COLUMN CAMIUN_NUM NVARCHAR(100) NULL"); } catch { }
+                    try { ExecuteMigration(db, "ALTER TABLE dbo.OTHER_DTL ALTER COLUMN CAMIUN_NUM NVARCHAR(100) NULL"); } catch { }
 
                     #endregion
 
                     #region UPDATE CHEK VIEWS (TAFSILI 2, 3, 4)
                     try
                     {
-                        db.Execute(@"CREATE OR ALTER VIEW dbo.CHEK_PLIST AS
+                        ExecuteMigration(db, @"CREATE OR ALTER VIEW dbo.CHEK_PLIST AS
 SELECT  dbo.PAY_GETP.N_SERI, dbo.PAY_GETP.BANK, dbo.PAY_GETP.DATE_S, dbo.PAY_GETP.DATE, dbo.PAY_GETP.SHOBEH, dbo.PAY_GETP.MABL,
         dbo.PAY_GETP.N_HESAB, dbo.PAY_GETP.N_S, dbo.TCOD_BANKS.NAMES, dbo.PAY_GETP.NAME_TAH, dbo.PAY_GETP.RADIF,
         dbo.PAY_GETP.N_KOL, dbo.PAY_GETP.N_MOIN, dbo.PAY_GETP.N_TAF,
@@ -116,7 +116,7 @@ WHERE   (dbo.PAY_GETP.N_KOL <> 911)");
 
                     try
                     {
-                        db.Execute(@"CREATE OR ALTER VIEW dbo.CHKE_DLIST AS
+                        ExecuteMigration(db, @"CREATE OR ALTER VIEW dbo.CHKE_DLIST AS
 SELECT  dbo.PAY_GETD.N_SERI, dbo.PAY_GETD.BANK, dbo.PAY_GETD.DATE_S, dbo.PAY_GETD.DATE, dbo.PAY_GETD.SHOBEH, dbo.PAY_GETD.MABL, dbo.PAY_GETD.NAME_TAH, dbo.PAY_GETD.N_HESAB, dbo.PAY_GETD.N_S,
         dbo.PAY_GETD.N_KOL, dbo.PAY_GETD.N_MOIN, dbo.PAY_GETD.N_TAF,
         TRY_CAST(dbo.GETTAF2(dbo.PAY_GETD.HES1) AS INT) AS HES_T2,
@@ -139,15 +139,15 @@ FROM    dbo.TCOD_BANKS INNER JOIN
                     catch { }
                     #endregion
 
-                    try { db.Execute($@"ALTER TABLE PAY_GETD
+                    try { ExecuteMigration(db, $@"ALTER TABLE PAY_GETD
 									   ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } //برای پشت فاکتور و دریافت چک برای قادر به ذخیره با شرط آیدی
-                    try { db.Execute($@"INSERT INTO dbo.PRICE_PAYNO ([PPID], [PPAME], [TR_DATE], [USERNAME], [MODAT]) VALUES (0, N'آزاد', GETDATE(), N'System', 0);"); } catch { } //برای کمبوباکس نحوه پرداخت ازاد خالی نباشه
+                    try { ExecuteMigration(db, $@"INSERT INTO dbo.PRICE_PAYNO ([PPID], [PPAME], [TR_DATE], [USERNAME], [MODAT]) VALUES (0, N'آزاد', GETDATE(), N'System', 0);"); } catch { } //برای کمبوباکس نحوه پرداخت ازاد خالی نباشه
 
-                    try { db.Execute($@"ALTER TABLE dbo.MODULE_D ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } //برای سایر واحد ها قابل آپدیت کردن با آیدی
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.MODULE_D ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } //برای سایر واحد ها قابل آپدیت کردن با آیدی
 
-                    try { db.Execute($@"ALTER TABLE dbo.TAKHPERS ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TAKHPERS ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"CREATE TABLE [dbo].[DEFAULTDEP](
+                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[DEFAULTDEP](
 	[TFSAZMAN] [int] NULL,
 	[SHIFT] [int] NULL,
 	[USERID] [int] NOT NULL,
@@ -161,13 +161,13 @@ FROM    dbo.TCOD_BANKS INNER JOIN
 ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 
 
-                    try { db.Execute($@"ALTER TABLE dbo.TCOD_MAP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MAP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.TCOD_MAP_GRP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MAP_GRP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.AZAE ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.AZAE ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"INSERT INTO GSCADTL ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])
+                    try { ExecuteMigration(db, $@"INSERT INTO GSCADTL ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])
 									VALUES
 									( 1, N'عالی', 100, 0, 0, 1 ), 
 									( 2, N'خیلی خوب', 83, 0, 0, 1 ), 
@@ -277,13 +277,13 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 									( 106, N'خیلی ضعیف', 160, 0, 0, 12 ), 
 									( 107, N'بد', 0, 0, 0, 12 )"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.TOTA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } // سرفصل حساب های کل
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TOTA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } // سرفصل حساب های کل
 
-                    try { db.Execute($@"ALTER TABLE dbo.DETA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } // سرفصل حساب های معین
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.DETA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } // سرفصل حساب های معین
 
-                    try { db.Execute($@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"CREATE TABLE [dbo].[TR_PAY_GETD]
+                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[TR_PAY_GETD]
 									(
 									[N_SERI] [float] NULL,
 									[BANK] [int] NULL,
@@ -328,19 +328,19 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 									[TRIDD] [int] NOT NULL IDENTITY(1, 1)
 									) ON [PRIMARY] "); } catch { }
 
-                    try { db.Execute($@" ALTER TABLE [dbo].[TR_PAY_GETD] ADD CONSTRAINT [PK__TR_PAY_G__9FFE4EA46E02EDDB] PRIMARY KEY CLUSTERED ([TRIDD]) ON [PRIMARY]"); } catch { }
+                    try { ExecuteMigration(db, $@" ALTER TABLE [dbo].[TR_PAY_GETD] ADD CONSTRAINT [PK__TR_PAY_G__9FFE4EA46E02EDDB] PRIMARY KEY CLUSTERED ([TRIDD]) ON [PRIMARY]"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.TAKHFIF_DEF_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TAKHFIF_DEF_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.CUSTKIND_TF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.CUSTKIND_TF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.TCODE_MENUITEM ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCODE_MENUITEM ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.PAY_GETP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.PAY_GETP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER VIEW ANBARGRD_SUB2 AS  SELECT  dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM2 AS EKH, dbo.ANBGRD_LST.GRD_NUM, dbo.ANBGRD_LST.CODE, dbo.STUF_DEF.NAME AS nam, dbo.ANBGRD_LST.MOG, dbo.ANBGRD_LST.NUM1, dbo.ANBGRD_LST.NUM2, 
+                    try { ExecuteMigration(db, $@"ALTER VIEW ANBARGRD_SUB2 AS  SELECT  dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM2 AS EKH, dbo.ANBGRD_LST.GRD_NUM, dbo.ANBGRD_LST.CODE, dbo.STUF_DEF.NAME AS nam, dbo.ANBGRD_LST.MOG, dbo.ANBGRD_LST.NUM1, dbo.ANBGRD_LST.NUM2, 
                          dbo.ANBGRD_LST.NUM3, dbo.ANBGRD_LST.MABL, dbo.TCOD_VAHEDS.NAMES, dbo.STUF_DEF.N_FANI, dbo.TCOD_STUFGROUP.NAMES AS grp
 					     FROM            dbo.ANBGRD_LST INNER JOIN
 					                              dbo.STUF_DEF ON dbo.ANBGRD_LST.CODE = dbo.STUF_DEF.CODE INNER JOIN
@@ -348,7 +348,7 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 					                              dbo.TCOD_STUFGROUP ON dbo.STUF_DEF.RADAH = dbo.TCOD_STUFGROUP.CODE
 					     WHERE        (dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM1 <> 0)"); } catch { }
 
-                    try { db.Execute($@"ALTER VIEW ANBARGRD_SUB3 AS  SELECT  dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM2 AS EKH, dbo.ANBGRD_LST.GRD_NUM, dbo.ANBGRD_LST.CODE, dbo.STUF_DEF.NAME AS nam, dbo.ANBGRD_LST.MOG, dbo.ANBGRD_LST.NUM1, dbo.ANBGRD_LST.NUM2, 
+                    try { ExecuteMigration(db, $@"ALTER VIEW ANBARGRD_SUB3 AS  SELECT  dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM2 AS EKH, dbo.ANBGRD_LST.GRD_NUM, dbo.ANBGRD_LST.CODE, dbo.STUF_DEF.NAME AS nam, dbo.ANBGRD_LST.MOG, dbo.ANBGRD_LST.NUM1, dbo.ANBGRD_LST.NUM2, 
                          dbo.ANBGRD_LST.NUM3, dbo.ANBGRD_LST.MABL, dbo.TCOD_VAHEDS.NAMES, dbo.STUF_DEF.N_FANI, dbo.TCOD_STUFGROUP.NAMES AS grp
 					     FROM            dbo.ANBGRD_LST INNER JOIN
 					                              dbo.STUF_DEF ON dbo.ANBGRD_LST.CODE = dbo.STUF_DEF.CODE INNER JOIN
@@ -356,9 +356,9 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 					                              dbo.TCOD_STUFGROUP ON dbo.STUF_DEF.RADAH = dbo.TCOD_STUFGROUP.CODE
 					     WHERE        (dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM1 <> 0)"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.VISITOR_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.VISITOR_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"CREATE FUNCTION dbo.ExtractAccountPattern
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION dbo.ExtractAccountPattern
 									(
 									    @InputString NVARCHAR(4000)
 									)
@@ -408,7 +408,7 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 
 
 
-                    try { db.Execute(@"
+                    try { ExecuteMigration(db, @"
 INSERT INTO dbo.TCOD_ARZ ([Code], [Title], [ISOCode], [CountryName])
 VALUES
 (965, N'ADB Unit of Account', N'XUA', N'MEMBER COUNTRIES OF THE AFRICAN DEVELOPMENT BANK'),
@@ -590,12 +590,12 @@ VALUES
 (999, N'Codes for transactions with no currency involved', N'XXX', N'ZZ07_No_Currency'),
 (951, N'East Caribbean Dollar', N'XCD', N'ANGUILLA'); "); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.TCOD_ARZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_ARZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.HEAD_LST ADD ARZKIND2 bigint"); } catch { } //نوع ارز به صورت آیدی یکتا ID
-                    try { db.Execute($@"ALTER TABLE dbo.HEAD_LST ADD ARZCODING nvarchar(100) "); } catch { }  //کدینگ ارز String
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_LST ADD ARZKIND2 bigint"); } catch { } //نوع ارز به صورت آیدی یکتا ID
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_LST ADD ARZCODING nvarchar(100) "); } catch { }  //کدینگ ارز String
 
-                    try { db.Execute($@"CREATE PROCEDURE GET_NAME_HES
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER PROCEDURE GET_NAME_HES
 									    @code NVARCHAR(255)
 									AS
 									BEGIN
@@ -631,7 +631,7 @@ VALUES
 									END "); } catch { }
 
                     //لاگ حذف کردن
-                    try { db.Execute($@"CREATE TABLE [dbo].[USER_AUDIT_LOG](
+                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[USER_AUDIT_LOG](
 										[ID] [BIGINT] IDENTITY(1,1) NOT NULL,
 										[UserName] [NVARCHAR](100) NOT NULL,
 										[WindowsUserName] [NVARCHAR](100) NULL,
@@ -658,28 +658,28 @@ VALUES
 									)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 									) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY] "); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE [dbo].[USER_AUDIT_LOG] ADD  DEFAULT ((1)) FOR [IsSuccess]"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[USER_AUDIT_LOG] ADD  DEFAULT ((1)) FOR [IsSuccess]"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE [dbo].[PAY_GETD] ALTER COLUMN [NAME_TAH] NVARCHAR(200) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETD] ALTER COLUMN [NAME_TAH] NVARCHAR(200) NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.MESAGEP ADD IsNotifyCalled BIT NULL DEFAULT (0)"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.MESAGEP ADD IsNotifyCalled BIT NULL DEFAULT (0)"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.EVENTS ADD [FXTYPE] [NVARCHAR] (10) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.EVENTS ADD [FXTYPE] [NVARCHAR] (10) NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.SAZMAN ADD SMSTYPE NVARCHAR(255) NULL DEFAULT 'TSMS' "); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.SAZMAN ADD SMSTYPE NVARCHAR(255) NULL DEFAULT 'TSMS' "); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.SMS_FORMATS ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.SMS_FORMATS ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.BLOCK_CUSTOMER ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.BLOCK_CUSTOMER ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE [dbo].[SALA_DTL] ADD [DEFAULT_NAHVA] [bigint] NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[SALA_DTL] ADD [DEFAULT_NAHVA] [bigint] NULL"); } catch { }
 
                     //حل مشکل آدرس توی سطح های بالاتر تفضیلی
                     try
                     {
-                        db.Execute(
+                        ExecuteMigration(db, 
                         $@"
-						CREATE VIEW [dbo].[CUST_HESAB_DTL_EXTENDED]
+						CREATE OR ALTER VIEW [dbo].[CUST_HESAB_DTL_EXTENDED]
 						AS
 						SELECT
 						    dbo.TDETA_HES.TNUMBER,
@@ -779,7 +779,7 @@ VALUES
                     catch { }
 
 
-                    try { db.Execute($@"CREATE TABLE [dbo].[CustomerComplaints](
+                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[CustomerComplaints](
 								    [ComplaintID] [int] IDENTITY(1,1) NOT NULL PRIMARY KEY,
 								    [CustomerFirstName] [nvarchar](100) NOT NULL,
 								    [CustomerLastName] [nvarchar](100) NOT NULL,
@@ -818,7 +818,7 @@ VALUES
 								    [ComplaintStatus] [nvarchar](50) NOT NULL DEFAULT N'جدید' -- e.g., جدید، در حال بررسی، بررسی شده، بسته شده
 								   ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE dbo.HEAD_LST ALTER COLUMN SHARAYET NVARCHAR(MAX)"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_LST ALTER COLUMN SHARAYET NVARCHAR(MAX)"); } catch { }
 
                     //New 1
                     {
@@ -867,7 +867,7 @@ VALUES
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
                             {
-                                try { db.Execute(cmdText); } catch { }
+                                try { ExecuteMigration(db, cmdText); } catch { }
                             }
                         }
                     }
@@ -927,7 +927,7 @@ VALUES
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
                             {
-                                try { db.Execute(cmdText); } catch { }
+                                try { ExecuteMigration(db, cmdText); } catch { }
                             }
                         }
                     }
@@ -986,13 +986,13 @@ VALUES
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
                             {
-                                try { db.Execute(cmdText); } catch { }
+                                try { ExecuteMigration(db, cmdText); } catch { }
                             }
                         }
                     }
 
-                    try { db.Execute($"DROP PROCEDURE dbo.sp_UpdateInvoicePricingAndDiscount"); } catch { }
-                    try { db.Execute($@"CREATE PROCEDURE [dbo].[sp_UpdateInvoicePricingAndDiscount]
+                    // CREATE OR ALTER below preserves the existing procedure if compilation fails.
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER PROCEDURE [dbo].[sp_UpdateInvoicePricingAndDiscount]
 							     @numb INT,
 							     @tgg INT,
 							     @PEPID_In INT,
@@ -1289,8 +1289,8 @@ VALUES
                     #region SP_JAYZEH
                     try
                     {
-                        try { db.Execute(@"IF OBJECT_ID('dbo.sp_ManageInvoiceRewards', 'P') IS NOT NULL DROP PROCEDURE dbo.sp_ManageInvoiceRewards;"); } catch { }
-                        db.Execute(@"CREATE PROCEDURE [dbo].[sp_ManageInvoiceRewards]
+                        try { ExecuteMigration(db, @"IF OBJECT_ID('dbo.sp_ManageInvoiceRewards', 'P') IS NOT NULL PRINT N'Preserving sp_ManageInvoiceRewards for CREATE OR ALTER';"); } catch { }
+                        ExecuteMigration(db, @"CREATE OR ALTER PROCEDURE [dbo].[sp_ManageInvoiceRewards]
 								    @InvoiceNumber bigint,
 								    @InvoiceTag bigint,
 								    @IsRewardSystemActive BIT,
@@ -1819,7 +1819,7 @@ VALUES
                     #endregion
 
                     //جدولی برای ثبت تریتب کاربران برای ارجاع
-                    try { db.Execute(@"CREATE TABLE USER_PERSONEL_ORDER (
+                    try { ExecuteMigration(db, @"CREATE TABLE USER_PERSONEL_ORDER (
 									USER_ID      INT        NOT NULL,
 									PERSONEL_ID  INT        NOT NULL,
 									SORT_ORDER   INT        NOT NULL,
@@ -1830,17 +1830,17 @@ VALUES
                     //لاگینِ عادی؛ به‌خواستِ صریحِ کاربر، چون تغییرِ ساختاریِ محاسبه‌ی پورسانت باید با اراده‌ی
                     //آگاهانه‌ی خودِ کاربر اجرا شود، نه خودکار و بی‌اطلاع در پسِ‌زمینه‌ی هر ورودِ ساده به برنامه.
                     {
-                        //ستون لاگِ سطر پورسانت باید پیش از CREATE PROCEDURE پایین وجود داشته باشد؛ آن رویه
+                        //ستون لاگِ سطر پورسانت باید پیش از CREATE OR ALTER PROCEDURE پایین وجود داشته باشد؛ آن رویه
                         //مستقیماً "SET LOG = ..." می‌نویسد، و ارجاعِ مستقیم به ستونِ ناموجود باعثِ شکستِ فوریِ
-                        //CREATE PROCEDURE می‌شود (برخلافِ COL_LENGTH که رشته می‌گیرد و دیرهنگام حل می‌شود).
+                        //CREATE OR ALTER PROCEDURE می‌شود (برخلافِ COL_LENGTH که رشته می‌گیرد و دیرهنگام حل می‌شود).
                         //تستِ روی دیتابیسِ کاملاً تازه نشان داد: اگر این خط بعد از این بلوک بماند (جای اصلیِ
                         //قبلی‌اش، پایین‌ترِ همین متد)، اولین اجرای دستیِ اسکریپت رویه را نمی‌سازد و کاربر باید
                         //دوباره دستی اجرا کند تا خودش را ترمیم کند؛ اینجا از همان اولین بار درست کار می‌کند.
-                        try { db.Execute(@"IF COL_LENGTH('dbo.VISITOR_DTL','LOG') IS NULL
+                        try { ExecuteMigration(db, @"IF COL_LENGTH('dbo.VISITOR_DTL','LOG') IS NULL
                                                ALTER TABLE dbo.VISITOR_DTL ADD [LOG] NVARCHAR(4000) NULL"); } catch { }
 
                         string sqlscript = @"
-CREATE FUNCTION dbo.Fixp
+CREATE OR ALTER FUNCTION dbo.Fixp
 (
     @st NVARCHAR(MAX)       -- رشتهٔ اصلی
 )
@@ -1869,7 +1869,7 @@ END;
 GO
 
 
-CREATE FUNCTION dbo.CODESAL (@us NVARCHAR(MAX))
+CREATE OR ALTER FUNCTION dbo.CODESAL (@us NVARCHAR(MAX))
 RETURNS NVARCHAR(MAX)
 AS
 BEGIN
@@ -1891,7 +1891,7 @@ BEGIN
 END;
 GO
 
-CREATE FUNCTION dbo.GETUSERCOD
+CREATE OR ALTER FUNCTION dbo.GETUSERCOD
 (
     @us NVARCHAR(400)      -- نام وارد‌شدهٔ کاربر
 )
@@ -1909,9 +1909,9 @@ BEGIN
     RETURN @idd;           -- NULL اگر پیدا نشود
 END;
 GO
-DROP PROCEDURE dbo.CalculateVisitorPorsant
+PRINT N'Preserving CalculateVisitorPorsant for CREATE OR ALTER'
 GO
-CREATE PROCEDURE dbo.CalculateVisitorPorsant
+CREATE OR ALTER PROCEDURE dbo.CalculateVisitorPorsant
 	@NUMBER FLOAT,
 	@TAG FLOAT,
 	@LOG NVARCHAR(MAX) = NULL,     -- این پارامتر برای لاگ است
@@ -2481,7 +2481,7 @@ BEGIN
 END;
 ";
                         //تقسیم روی خطِ مستقلِ GO. الگوی قبلی فقط با پایان‌خطِ ویندوزی (CRLF) کار می‌کرد و روی
-                        //چک‌اوتِ LF کلِ اسکریپت یک Batch می‌شد و چون CREATE FUNCTION باید اولین دستور
+                        //چک‌اوتِ LF کلِ اسکریپت یک Batch می‌شد و چون CREATE OR ALTER FUNCTION باید اولین دستور
                         //Batch باشد، بی‌صدا (داخل catch) شکست می‌خورد و توابع اصلاً ساخته نمی‌شدند.
                         var commands = System.Text.RegularExpressions.Regex.Split(
                             sqlscript, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$",
@@ -2491,7 +2491,7 @@ END;
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
                             {
-                                try { db.Execute(cmdText); } catch { }
+                                try { ExecuteMigration(db, cmdText); } catch { }
                             }
                         }
                     }
@@ -2499,14 +2499,14 @@ END;
 
 
                     //Super Fast Index for Automation MAIN
-                    try { db.Execute($@"CREATE NONCLUSTERED INDEX IX_TASKS_Status1
+                    try { ExecuteMigration(db, $@"CREATE NONCLUSTERED INDEX IX_TASKS_Status1
 									ON dbo.TASKS (STATUS, IDNUM)          -- برای فیلتر و ORDER BY
 									INCLUDE (GR, PERSONEL, TASK, PERIORITY, STDATE, STTIME,
 									         ENDATE, ENTIME, USERNAME, COMP_COD, SUMTIME,
 									          ss, skid, num, tg, CTIM, USERCO, SEE)"); } catch { }
 
 
-                    try { db.Execute($@"ALTER TABLE dbo.VISITOR_DTL ADD LOG NVARCHAR(4000) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.VISITOR_DTL ADD LOG NVARCHAR(4000) NULL"); } catch { }
 
 
                     //محاسبه/بازسازی پورسانت ویزیتور فاکتور فروش — پشتوانه‌ی پنجره‌ی «کنترل پورسانت فاکتور فروش»
@@ -2518,14 +2518,14 @@ END;
                     //تا یک خطای احتمالی اینجا کل زنجیره‌ی مهاجرتِ لاگین را نخواباند.
                     try
                     {
-                        db.Execute(@"IF OBJECT_ID(N'dbo.RecalcVisitorPorsant_ByDarsad', N'P') IS NOT NULL
-                                         DROP PROCEDURE dbo.RecalcVisitorPorsant_ByDarsad");
+                        ExecuteMigration(db, @"IF OBJECT_ID(N'dbo.RecalcVisitorPorsant_ByDarsad', N'P') IS NOT NULL
+                                         PRINT N'Preserving RecalcVisitorPorsant_ByDarsad for CREATE OR ALTER'");
                     }
                     catch { }
 
                     try
                     {
-                        db.Execute(@"CREATE PROCEDURE dbo.RecalcVisitorPorsant_ByDarsad
+                        ExecuteMigration(db, @"CREATE OR ALTER PROCEDURE dbo.RecalcVisitorPorsant_ByDarsad
     @NUMBER       FLOAT  = NULL,   -- شماره فاکتور؛ NULL یعنی همه فاکتورها
     @TAG          FLOAT  = 2,      -- نوع سند؛ 2 = فاکتور فروش، NULL یعنی همه
     @FromDate     BIGINT = NULL,   -- تاریخ شمسی ۸ رقمی، مثلا 14050101
@@ -2636,7 +2636,7 @@ END");
                     catch { }
 
 
-                    try { db.Execute($@"CREATE FUNCTION dbo.Getusersemat
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION dbo.Getusersemat
 									(
 									    @usid INT,
 									    @fld NVARCHAR(50)
@@ -2674,7 +2674,7 @@ END");
 									    RETURN ISNULL(@ret, N'')
 									END"); } catch { }
 
-                    try { db.Execute($@"CREATE FUNCTION dbo.GETUSERHES
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION dbo.GETUSERHES
 									(
 									    @US INT
 									)
@@ -2686,7 +2686,7 @@ END");
 									    RETURN ISNULL(@hes, '')
 									END"); } catch { }
 
-                    try { db.Execute($@"CREATE FUNCTION dbo.GETHESNAME
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION dbo.GETHESNAME
 									(
 									    @HES NVARCHAR(50)
 									)
@@ -2698,7 +2698,7 @@ END");
 									    RETURN ISNULL(@name, '')
 									END"); } catch { }
 
-                    try { db.Execute($@"CREATE FUNCTION [dbo].[SplitInts]
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION [dbo].[SplitInts]
 									(
 									    @List NVARCHAR(MAX),
 									    @Delimiter CHAR(1)
@@ -2719,157 +2719,11 @@ END");
 									END
 									"); } catch { }
 
-                    try { db.Execute("DROP FUNCTION dbo.MOGHA_ANBAR"); } catch { }
-                    try { db.Execute($@"
-CREATE FUNCTION [dbo].[MOGHA_ANBAR] (@dt2 INT, @ANBAR INT, @KOL INT)
-RETURNS TABLE
-AS
-RETURN (
-    WITH
-    -- موجودی اولیه + ورودی‌های انبار (جایگزین AK_MOGO_AVL_KOL_SUB)
-    avl_sub AS (
-        SELECT CODE, SUM(MOGODI_A) AS MEG, SUM(MABL_A) AS SumOfMABL_A, ANBAR
-        FROM dbo.STUF_FSK
-        GROUP BY CODE, ANBAR
-        HAVING ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
+                    // MOGHA_ANBAR is installed once, with its final definition below.
 
-        UNION ALL
-
-        SELECT i.CODE, SUM(i.MEGHk), SUM(i.MABL_K), i.ANBAR
-        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG IN (1, 7, 9, 24) AND h.DATE_N <= @dt2
-        GROUP BY i.CODE, i.ANBAR
-        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-
-        UNION ALL
-
-        SELECT i.CODE, SUM(i.MEGH_MAR), SUM(i.MABL * i.MEGH_MAR), i.ANBAR
-        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG = 22 AND h.DATE_N <= @dt2 AND i.MEGH_MAR <> 0
-        GROUP BY i.CODE, i.ANBAR
-        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-
-        UNION ALL
-
-        SELECT i.CODE, SUM(i.MEGHk), SUM(i.MABL_K), i.ANBARF
-        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG = 5 AND h.DATE_N <= @dt2
-        GROUP BY i.CODE, i.ANBARF
-        HAVING i.ANBARF LIKE CAST(@ANBAR AS NVARCHAR(10))
-
-        UNION ALL
-
-        SELECT l.CODE, SUM((l.MOG - l.NUM3) * -1), SUM(ABS(l.MOG - l.NUM3) * l.MABL), a.GRD_ANBAR
-        FROM dbo.ANBGRD_LST l INNER JOIN dbo.ANBGRD_HEAD a ON l.GRD_NUM = a.GRD_NUM
-        WHERE a.GRD_DATE <= @dt2 AND a.N_S IS NOT NULL
-              AND a.GRD_ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-        GROUP BY l.CODE, a.GRD_ANBAR
-        HAVING SUM((l.MOG - l.NUM3) * -1) >= 0
-    ),
-    -- جمع کل موجودی اولیه برای هر کالا-انبار (جایگزین AK_MOGO_AVL_KOL + AKMOGO_AVL_KOL)
-    avl AS (
-        SELECT CODE, SUM(NULLIF(MEG, 0)) AS SMEGH, SUM(SumOfMABL_A) AS SMABLA, ANBAR
-        FROM avl_sub
-        GROUP BY CODE, ANBAR
-    ),
-    -- سفارشات فروش باز (جایگزین AK_MOGO_FR_SUB)
-    fr_sub AS (
-        SELECT i.CODE, SUM(i.MEGHk) AS MEG, i.ANBAR
-        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG IN (2, 5, 8, 10, 11, 26) AND h.DATE_N <= @dt2
-        GROUP BY i.CODE, i.ANBAR
-        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-
-        UNION ALL
-
-        SELECT l.CODE, SUM(l.MOG - l.NUM3), a.GRD_ANBAR
-        FROM dbo.ANBGRD_LST l INNER JOIN dbo.ANBGRD_HEAD a ON l.GRD_NUM = a.GRD_NUM
-        WHERE a.GRD_DATE <= @dt2 AND a.N_S IS NOT NULL
-              AND a.GRD_ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-        GROUP BY l.CODE, a.GRD_ANBAR
-        HAVING SUM(l.MOG - l.NUM3) > 0
-
-        UNION ALL
-
-        SELECT i.CODE, SUM(i.MEGHK), i.ANBAR
-        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG = 20 AND h.DATE_N <= @dt2 AND (h.TAMIR = 1 OR h.TAMIR = 4)
-        GROUP BY i.CODE, i.ANBAR
-        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
-    ),
-    -- جمع فروش باز (جایگزین AK_MOGO_FR)
-    fr AS (
-        SELECT CODE, SUM(MEG) AS MEG, ANBAR
-        FROM fr_sub
-        GROUP BY CODE, ANBAR
-    ),
-    -- آخرین وارده برای محاسبه میانگین قیمت: فقط تراکنش‌های ورودی
-    lastav_base AS (
-        -- وارده مستقیم: خرید، برگشت فروش، تولید، سایر ورودی‌ها
-        SELECT i.CODE, i.ANBAR, i.AVRAGE AS AVRAGE, h.DATE_N, ISNULL(h.FNUMCO, 0) AS FNUMCO
-        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
-        WHERE h.DATE_N <= @dt2 AND i.TAG IN (1, 7, 9, 24)
-
-        UNION ALL
-
-        -- وارده از انتقال: کالایی که به این انبار منتقل شده (ANBARF = انبار مقصد)
-        SELECT i.CODE, i.ANBARF, i.AVRAGE2, h.DATE_N, ISNULL(h.FNUMCO, 0) AS FNUMCO
-        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
-        WHERE h.DATE_N <= @dt2 AND i.TAG = 5
-    ),
-    -- آخرین میانگین قیمت به ازای هر کالا-انبار (جایگزین lastavrage)
-    lastav AS (
-        SELECT CODE, ANBAR, AVRAGE,
-		ROW_NUMBER() OVER (PARTITION BY CODE, ANBAR ORDER BY DATE_N DESC, FNUMCO DESC) AS rn
-        FROM lastav_base
-    ),
-    -- کارت انبار: موجودی عددی + ارزش ریالی (جایگزین mogudi_tafkik + AKMOGUDI_KOL_ANBAR)
-    kart_anbar AS (
-        SELECT
-            sf.CODE,
-            sf.ANBAR,
-            ROUND(ISNULL(ISNULL(avl.SMEGH, 0) - ISNULL(fr.MEG, 0), 0), 2) AS MAND,
-            ISNULL(
-                COALESCE(la.AVRAGE, sf.FI_A, 0) *
-                ROUND(ISNULL(ISNULL(avl.SMEGH, 0) - ISNULL(fr.MEG, 0), 0), 2),
-                0
-            ) AS MABLK
-        FROM dbo.STUF_FSK sf
-        INNER JOIN avl ON sf.CODE = avl.CODE AND sf.ANBAR = avl.ANBAR
-        LEFT  JOIN fr  ON sf.CODE = fr.CODE  AND sf.ANBAR = fr.ANBAR
-        LEFT  JOIN (SELECT CODE, ANBAR, AVRAGE FROM lastav WHERE rn = 1) la
-               ON sf.CODE = la.CODE AND sf.ANBAR = la.ANBAR
-        WHERE sf.ANBAR = @ANBAR
-    ),
-    -- مانده حسابداری (جایگزین HESAB_ANBAR)
-    hesab AS (
-        SELECT d.HES_K, d.HES_M, SUM(d.BED - d.BES) AS mand, d.HES_T, d.HES
-        FROM dbo.DEED_DTL d INNER JOIN dbo.DEED_HED h ON d.N_S = h.N_S
-        WHERE h.DATE_S <= @dt2 AND d.HES_K = @KOL AND d.HES_M = @ANBAR
-        GROUP BY d.HES_K, d.HES_M, d.HES_T, d.HES
-    )
-    SELECT
-        ka.CODE,
-        ROUND(ka.MABLK, 0)                                                             AS MABLK,
-        ka.MAND,
-        ISNULL(he.mand, 0)                                                             AS mab,
-        CASE WHEN (ka.MABLK - ISNULL(he.mand, 0)) > 0
-             THEN ROUND(ka.MABLK - ISNULL(he.mand, 0), 0)
-             ELSE 0 END                                                                AS tafBED,
-        CASE WHEN (ka.MABLK - ISNULL(he.mand, 0)) <= 0
-             THEN ROUND(ka.MABLK - ISNULL(he.mand, 0), 0) * -1
-             ELSE 0 END                                                                AS TAFBES,
-        he.HES_T,
-        he.HES_K,
-        he.HES_M,
-        he.HES
-    FROM kart_anbar ka
-    LEFT JOIN hesab he ON ka.CODE = he.HES_T
-);
-"); } catch { }
 
                     //SELECT * FROM dbo.VISITOR_DTL_KALA(0, 99991230, N'%')WHERE DEPATMAN = 20;
-                    try { db.Execute($@"ALTER FUNCTION dbo.VISITOR_DTL_KALA
+                    try { ExecuteMigration(db, $@"ALTER FUNCTION dbo.VISITOR_DTL_KALA
 									(
 									    @dt1 bigint,
 									    @dt2 bigint,
@@ -2913,7 +2767,7 @@ RETURN (
 									)"); } catch { }
 
                     //تنظیمات عمومی بیشتر
-                    try { db.Execute(@"CREATE TABLE [dbo].[GENERAL_OPTIONS] (
+                    try { ExecuteMigration(db, @"CREATE TABLE [dbo].[GENERAL_OPTIONS] (
 								       [OptionName]  NVARCHAR(100) PRIMARY KEY NOT NULL,
 								       [OptionValue] NVARCHAR(500) NULL,
 								       [Description] NVARCHAR(1000) NULL,
@@ -2922,17 +2776,17 @@ RETURN (
 								   );"); } catch { }
 
                     //اضافه کردن ستون CRT (تاریخ ایجاد) به GENERAL_OPTIONS
-                    try { db.Execute(@"ALTER TABLE [dbo].[GENERAL_OPTIONS]
+                    try { ExecuteMigration(db, @"ALTER TABLE [dbo].[GENERAL_OPTIONS]
                                    ADD [CRT] DATETIME NULL
                                    CONSTRAINT [DF__GENERAL_OPT__CRT__2C3B9588] DEFAULT (GETDATE());"); } catch { }
                     //اضافه کردن ستون UID (کد کاربر) به GENERAL_OPTIONS برای تنظیمات per-user
-                    try { db.Execute(@"ALTER TABLE [dbo].[GENERAL_OPTIONS]
+                    try { ExecuteMigration(db, @"ALTER TABLE [dbo].[GENERAL_OPTIONS]
                                    ADD [UID] bigint NULL;"); } catch { }
 
 
 
                     //باز گردانی اصلاحیه اشتباه برای این تابع , برش میگردونیم به چیزی که قبلا بود مثل اکسس
-                    try { db.Execute(@"ALTER FUNCTION [dbo].[Q_BEDEHBESTANHA_SUB]
+                    try { ExecuteMigration(db, @"ALTER FUNCTION [dbo].[Q_BEDEHBESTANHA_SUB]
 								   (@DT bigint)
 									RETURNS TABLE
 									AS
@@ -2963,10 +2817,10 @@ RETURN (
                         // برای سادگی در SQL 2008، فرض بر ایجاد تابع جدید است:
 
                         // اگر تابع جدید قبلا وجود دارد آن را حذف کن تا دوباره بسازیم
-                        db.Execute("IF OBJECT_ID('dbo.Q_BEDEHBESTANHA_FULL') IS NOT NULL DROP FUNCTION dbo.Q_BEDEHBESTANHA_FULL");
+                        ExecuteMigration(db, "IF OBJECT_ID('dbo.Q_BEDEHBESTANHA_FULL') IS NOT NULL PRINT N'Preserving Q_BEDEHBESTANHA_FULL for CREATE OR ALTER'");
 
-                        db.Execute(@"
-								CREATE FUNCTION [dbo].[Q_BEDEHBESTANHA_FULL]
+                        ExecuteMigration(db, @"
+								CREATE OR ALTER FUNCTION [dbo].[Q_BEDEHBESTANHA_FULL]
 								(
 								    @DT bigint,
 								    @IncludeZero bit = 0
@@ -3024,22 +2878,22 @@ RETURN (
                     catch { }
 
                     //اتوماسیون
-                    try { db.Execute(@"ALTER TABLE MESAGEP ADD SNOOZE_COUNT INT DEFAULT 0 
+                    try { ExecuteMigration(db, @"ALTER TABLE MESAGEP ADD SNOOZE_COUNT INT DEFAULT 0 
 								   ALTER TABLE MESAGEP ADD LAST_NOTIFY_TIME DATETIME NULL"); } catch { }
 
                     //مرکز هزینه
-                    try { db.Execute($@"ALTER TABLE dbo.TCOD_MARKAZHAZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MARKAZHAZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
                     //ایجاد فرمول ساخت سطر
-                    try { db.Execute($@"ALTER TABLE dbo.DTL_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.DTL_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
 
                     //دفتر چک افزایش فضای نام حساب پرداختی
-                    try { db.Execute($@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [NAME_TAH] NVARCHAR(200) NULL"); } catch { }
-                    try { db.Execute($@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [N_HESAB] NVARCHAR(200) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [NAME_TAH] NVARCHAR(200) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [N_HESAB] NVARCHAR(200) NULL"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [SHOBEH] NVARCHAR(50) NULL"); } catch { }
-                    try { db.Execute($@"ALTER TABLE [dbo].[PAY_GETD] ALTER COLUMN [SHOBEH] NVARCHAR(50) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETP] ALTER COLUMN [SHOBEH] NVARCHAR(50) NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETD] ALTER COLUMN [SHOBEH] NVARCHAR(50) NULL"); } catch { }
 
                     // ============================================================================
                     // بررسی و حذف رزرو قطعی پیش‌فاکتورهایی که زمان رزرو آن‌ها منقضی شده است (96 ساعت) : فقط برای رزرو عادی یعنی HEAD_LST.TAMIR = 1 || HEAD_LST_LOG.RESERVED = 1
@@ -3049,18 +2903,18 @@ RETURN (
                         // 1. حذف پروسیجر در صورت وجود
                         try
                         {
-                            db.Execute(@"
+                            ExecuteMigration(db, @"
                         IF OBJECT_ID(N'[dbo].[sp_CheckReservationTimeout]', N'P') IS NOT NULL
                         BEGIN
-                            DROP PROCEDURE [dbo].[sp_CheckReservationTimeout];
+                            PRINT N'Preserving sp_CheckReservationTimeout for CREATE OR ALTER';
                         END");
                         }
                         catch { }
                         // 2. ایجاد پروسیجر بررسی تایم‌اوت رزرو
                         try
                         {
-                            db.Execute(@"
-                        CREATE PROCEDURE [dbo].[sp_CheckReservationTimeout]
+                            ExecuteMigration(db, @"
+                        CREATE OR ALTER PROCEDURE [dbo].[sp_CheckReservationTimeout]
                         AS
                         BEGIN
                             SET NOCOUNT ON;
@@ -3108,7 +2962,7 @@ RETURN (
                         // 3. ایجاد SQL Server Agent Job برای اجرای خودکار پروسیجر (هر 1 ساعت)
                         try
                         {
-                            db.Execute(@"
+                            ExecuteMigration(db, @"
                         -- پاکسازی جاب قدیمی در صورت وجود
                         IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs WHERE name = N'CheckReservationTimeout')
                         BEGIN
@@ -3119,7 +2973,7 @@ RETURN (
 
                         try
                         {
-                            db.Execute(@"
+                            ExecuteMigration(db, @"
                         DECLARE @ReturnCode INT = 0;
                         DECLARE @JobId BINARY(16);
 						DECLARE @DbName NVARCHAR(128) = DB_NAME();
@@ -3183,7 +3037,7 @@ RETURN (
                     }
 
                     //تعریف پورسانت ویزیتور
-                    try { db.Execute($@"ALTER TABLE dbo.VISITORS_PORSANT_KALA ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+                    try { ExecuteMigration(db, $@"ALTER TABLE dbo.VISITORS_PORSANT_KALA ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
                     if (false) //isCustomCall
                     {
@@ -3322,7 +3176,7 @@ RETURN (
                     }
 
                     //ایجاد داده های مربوط به لیست کشور ها
-                    try { db.Execute($@"INSERT INTO TCOD_Countries ([Code], [CountriesName], [CodeIcon], [THREE_LETTER_CODE])
+                    try { ExecuteMigration(db, $@"INSERT INTO TCOD_Countries ([Code], [CountriesName], [CodeIcon], [THREE_LETTER_CODE])
 						                VALUES
 						                ( 100001, N'آرژانتین', 64, N'ARG' ), 
 						                ( 100002, N'آروبا', 75, N'ABW' ), 
@@ -3541,7 +3395,7 @@ RETURN (
                         // ---------------------------------------------------------
                         //            string dropSql = @"
                         //    IF OBJECT_ID('[dbo].[sp_Mogudi_Tafkik_Optimized]') IS NOT NULL
-                        //        DROP PROCEDURE [dbo].[sp_Mogudi_Tafkik_Optimized];
+                        //        PRINT N'Preserving sp_Mogudi_Tafkik_Optimized for CREATE OR ALTER';
                         //";
                         //            db.Execute(dropSql);
 
@@ -3549,9 +3403,9 @@ RETURN (
                         // Step 2: Create the Stored Procedure
                         // ---------------------------------------------------------
 
-                        db.Execute("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;");
+                        ExecuteMigration(db, "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;");
                         string createSql = $@"
-                CREATE PROCEDURE [dbo].[sp_Mogudi_Tafkik_Optimized]
+                CREATE OR ALTER PROCEDURE [dbo].[sp_Mogudi_Tafkik_Optimized]
                     @Forms___F_MENU_ANBAR___DT2 BIGINT,
                     @Forms___F_MENU_ANBAR___MANBAR NVARCHAR(10)
                 AS
@@ -3744,7 +3598,7 @@ RETURN (
                 END
             ";
 
-                        db.Execute(createSql);
+                        ExecuteMigration(db, createSql);
                     }
                     catch (Exception ex)
                     {
@@ -3769,7 +3623,7 @@ RETURN (
                 if (isCustomCall)
                 {
                     //تابع تبدیل تاریخ جلالی به میلادی
-                    try { db.Execute($@"CREATE FUNCTION dbo.fn_JalaliIntToGregorianDate (@JalaliInt BIGINT)
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION dbo.fn_JalaliIntToGregorianDate (@JalaliInt BIGINT)
 									RETURNS DATETIME
 									AS
 									BEGIN
@@ -3874,7 +3728,7 @@ RETURN (
 									    );
 									END"); } catch { }
 
-                    try { db.Execute(@"CREATE TABLE [dbo].[Travelreason]
+                    try { ExecuteMigration(db, @"CREATE TABLE [dbo].[Travelreason]
 (
 [Code] [int] NULL,
 [TravelreasonName] [nvarchar] (25) COLLATE Arabic_CI_AS NULL,
@@ -3885,7 +3739,7 @@ RETURN (
 
                     //1405/01/08
                     //اصلاح محاسبه مبلغ موجودی در گزارش تراز یک انبار:
-                    try { db.Execute(@"ALTER FUNCTION [dbo].[TARAZ_ANBAR_KHAS](@FORMS___F_MENU_ANBAR_TARAZ___DT2 BIGINT, @ANB INT)
+                    try { ExecuteMigration(db, @"ALTER FUNCTION [dbo].[TARAZ_ANBAR_KHAS](@FORMS___F_MENU_ANBAR_TARAZ___DT2 BIGINT, @ANB INT)
 RETURNS TABLE
 AS
 RETURN(
@@ -3961,7 +3815,7 @@ RETURN(
 );"); } catch { }
 
                     //اصلاح محاسبه مبلغ موجودی در تراز کل انبار ها:
-                    try { db.Execute(@"ALTER VIEW [dbo].[TARAZ_ANBAR_KOL]
+                    try { ExecuteMigration(db, @"ALTER VIEW [dbo].[TARAZ_ANBAR_KOL]
 AS
 -- 1. استخراج تمام تراکنش‌ها از تابع کارت انبار با مشخص کردن ردیف برای آخرین فی معتبر هر انبار
 WITH Ledger AS (
@@ -4058,7 +3912,7 @@ ORDER BY B.NAME;"); } catch { }
                     // مستقیم GHEYMAT_TAMAM روی CODE در AKMOGUDI_KOL_ANBAR، TARAZ_ANBAR_KOL و
                     // TARAZ_ANBAR_KHAS_GRP ردیف‌ها (و جمع‌های مبلغی) را چند برابر می‌کرد.
                     // اکنون فقط آخرین سند تولید هر کالا (بر اساس DATE_ACTIV سپس FNUMB) برگردانده می‌شود.
-                    try { db.Execute(@"CREATE OR ALTER VIEW [dbo].[GHEYMAT_TAMAM]
+                    try { ExecuteMigration(db, @"CREATE OR ALTER VIEW [dbo].[GHEYMAT_TAMAM]
 AS
 SELECT T.CODE, T.GHEMAT, T.FNUMB
 FROM (
@@ -4071,10 +3925,10 @@ FROM (
 ) AS T
 WHERE T.RN = 1;"); } catch { }
 
-                    try { db.Execute($@"ALTER TABLE [dbo].[PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به خزانه
-                    try { db.Execute($@"ALTER TABLE [dbo].[TR_PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به جدول تاریخچه خزانه
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به خزانه
+                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[TR_PGET_LST] ADD [MHAZ_NO] [int] NULL"); } catch { } // اضافه کردن مرکز هزینه به جدول تاریخچه خزانه
 
-                    try { db.Execute($@"ALTER FUNCTION [dbo].[MOGHA_ANBAR] (@dt2 INT, @ANBAR INT, @KOL INT)
+                    try { ExecuteMigration(db, $@"CREATE OR ALTER FUNCTION [dbo].[MOGHA_ANBAR] (@dt2 INT, @ANBAR INT, @KOL INT)
 RETURNS TABLE
 AS
 RETURN (
@@ -4254,7 +4108,7 @@ RETURN (
     LEFT JOIN hesab he ON ka.CODE = he.HES_T
 );"); } catch { }
 
-                    try { db.Execute($@"
+                    try { ExecuteMigration(db, $@"
 IF NOT EXISTS (SELECT 1 FROM sys.objects
                WHERE object_id = OBJECT_ID(N'dbo.IVO_EXTENDED') AND type = 'U')
 BEGIN
@@ -4390,11 +4244,11 @@ END
                 //چند انبار بار شده باشد، پورسانتِ فاکتور به نسبتِ مبلغ خالصِ سطرهای هر انبار تسهیم می‌شود.
                 //مبنای مبلغ عیناً همان چیزی است که dbo.CalculateVisitorPorsant استفاده می‌کند:
                 //MABL_K - N_MOIN روی سطرهای غیرجایزه (JAY = 0).
-                try { db.Execute(@"IF OBJECT_ID(N'dbo.VISITOR_PORSANT_ANBAR', N'V') IS NOT NULL
-                                       DROP VIEW dbo.VISITOR_PORSANT_ANBAR"); } catch { }
+                try { ExecuteMigration(db, @"IF OBJECT_ID(N'dbo.VISITOR_PORSANT_ANBAR', N'V') IS NOT NULL
+                                       PRINT N'Preserving VISITOR_PORSANT_ANBAR for CREATE OR ALTER'"); } catch { }
                 try
                 {
-                    db.Execute(@"CREATE VIEW dbo.VISITOR_PORSANT_ANBAR
+                    ExecuteMigration(db, @"CREATE OR ALTER VIEW dbo.VISITOR_PORSANT_ANBAR
 AS
 SELECT
     vd.ID                        AS PORSANT_ID,
@@ -4438,11 +4292,11 @@ FROM dbo.VISITOR_DTL vd
                 //پورسانتِ پشتِ هر فاکتور برای پنجره‌ی جستجو در گردش کالا (F12)
                 //KALAS سطرِ کالاست؛ پورسانت سطحِ فاکتور است، پس برای هر سطر همان پورسانتِ فاکتورش
                 //تکرار می‌شود. اگر فاکتور بیش از یک ویزیتور داشته باشد، مبالغ جمع و نام‌ها کنار هم می‌آیند.
-                try { db.Execute(@"IF OBJECT_ID(N'dbo.KALAS_PORSANT', N'V') IS NOT NULL
-                                       DROP VIEW dbo.KALAS_PORSANT"); } catch { }
+                try { ExecuteMigration(db, @"IF OBJECT_ID(N'dbo.KALAS_PORSANT', N'V') IS NOT NULL
+                                       PRINT N'Preserving KALAS_PORSANT for CREATE OR ALTER'"); } catch { }
                 try
                 {
-                    db.Execute(@"CREATE VIEW dbo.KALAS_PORSANT
+                    ExecuteMigration(db, @"CREATE OR ALTER VIEW dbo.KALAS_PORSANT
 AS
 SELECT k.*,
        v.PRS_VISITOR,
@@ -4472,7 +4326,7 @@ FROM dbo.KALAS k
                 {
 
                     //Ctrl + F8 - دفتر تفضیلی - پشتیبانی از ملاحظات برگشت خرید
-                    try { db.Execute(@"
+                    try { ExecuteMigration(db, @"
 CREATE OR ALTER FUNCTION [dbo].[Q_GARDESH_KHFR_DAFTAR_SUB1] (
     @Forms___F_MENU_KOL_MOIN_TAFZIL___DT1 bigint,
     @Forms___F_MENU_KOL_MOIN_TAFZIL___DT2 bigint,
@@ -4501,7 +4355,7 @@ RETURNS TABLE AS RETURN (
     FROM dbo.Q_GARDESH_KHFR_MAND(@Forms___F_MENU_KOL_MOIN_TAFZIL___DT1, @Forms___F_MENU_KOL_MOIN_TAFZIL___HTTAF) Q_GARDESH_KHFR_MAND
 )"); } catch { }
 
-                    try { db.Execute(@"
+                    try { ExecuteMigration(db, @"
 CREATE OR ALTER FUNCTION [dbo].[Q_GARDESH_KHFR_DAFTAR_SUB]
    (@Forms___F_MENU_KOL_MOIN_TAFZIL___DT1 bigint,
    @Forms___F_MENU_KOL_MOIN_TAFZIL___DT2 bigint,
@@ -4553,7 +4407,7 @@ WHERE     (RTRIM(CAST(dbo.DEED_DTL.HES_K AS nvarchar)) + '-' + RTRIM(CAST(dbo.DE
 "); } catch { }
 
                     //Ctrl + F8 - دفتر تفضیلی - همیشه اجرا می‌شود تا امضای صحیح روی DB باشد
-                    try { db.Execute($@"
+                    try { ExecuteMigration(db, $@"
 CREATE OR ALTER PROC [dbo].[usp_TafzilLedger]
     @FromDate     INT,
     @ToDate       INT,
@@ -4680,7 +4534,7 @@ END
                 {
                     try
                     {
-                        db.Execute(@"
+                        ExecuteMigration(db, @"
 -- ثبت دسترسی‌های تفکیک‌شده جدید در TFORMS
 IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'PFRSKB')
     INSERT INTO dbo.TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
@@ -4743,7 +4597,7 @@ END
 
                     try
                     {
-                        db.Execute(@"IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'IRAN_SALES_MAP')
+                        ExecuteMigration(db, @"IF NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE FORMNAME = N'IRAN_SALES_MAP')
                                      INSERT INTO TFORMS (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
                                      VALUES ('IRAN_SALES_MAP', N'گزارش فروش روی نقشه ایران', 3, 5, (SELECT ISNULL(MAX(IDH),0)+1 FROM dbo.TFORMS), GETDATE());");
                     }
@@ -4977,7 +4831,7 @@ END CATCH;";
 
             try
             {
-                db.Execute(script, new { PREVIEW_ONLY = previewOnly });
+                ExecuteMigration(db, script, new { PREVIEW_ONLY = previewOnly });
             }
             catch (Exception ex)
             {

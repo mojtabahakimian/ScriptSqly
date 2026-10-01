@@ -67,7 +67,7 @@ SELECT @result;");
         }
     }
 
-    private static readonly Regex Definition = new(@"\A\s*(?:(?:--[^\r\n]*(?:\r?\n|$))|(?:/\*.*?\*/\s*))*\s*(?:CREATE(?:\s+OR\s+ALTER)?|ALTER)\s+(PROC(?:EDURE)?|FUNCTION|VIEW)\s+((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+    private static readonly Regex Definition = new(@"\A\s*(?:(?:--[^\r\n]*(?:\r?\n|$))|(?:/\*.*?\*/\s*))*\s*(?<verb>CREATE(?:\s+OR\s+ALTER)?|ALTER)\s+(PROC(?:EDURE)?|FUNCTION|VIEW)\s+((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
     public static bool EquivalentDefinition(string existing, string desired)
@@ -120,6 +120,16 @@ SELECT @result;");
                     context.Progress?.Invoke(new(number, label, "skipped", timer.ElapsedMilliseconds));
                     return 0;
                 }
+                // SQL Server can resolve sp_-prefixed CREATE OR ALTER to a
+                // same-named master procedure even when the local one is absent.
+                // Use CREATE for a genuinely missing local procedure; do not
+                // replace an existing encrypted/inaccessible or different object.
+                var verb = definition.Groups["verb"];
+                if (current is null && definition.Groups[1].Value.StartsWith("PROC", StringComparison.OrdinalIgnoreCase)
+                    && Regex.IsMatch(verb.Value, @"\ACREATE\s+OR\s+ALTER\z", RegexOptions.IgnoreCase)
+                    && db.ExecuteScalar<int>("SELECT COUNT(*) FROM sys.objects WHERE object_id=OBJECT_ID(@name)",
+                        new { name = objectName }, transaction, commandTimeout ?? 30) == 0)
+                    sql = sql[..verb.Index] + "CREATE" + sql[(verb.Index + verb.Length)..];
             }
 
             // A repeated single-column ADD needs no schema lock or expected exception.

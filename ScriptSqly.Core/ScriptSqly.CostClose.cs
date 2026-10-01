@@ -22,8 +22,8 @@ namespace ScriptSqly.Migrations
 /* ═══════════════════════════════════════════════════════════════════
    فاز ۱ — فایل ۱ از ۳ : ساختار جداول
 
-   هیچ جدول موجودی تغییر نمی‌کند. همه چیز با پیشوند CC_ اضافه می‌شود.
-   قابل اجرای مکرر: اگر جدولی از قبل باشد، دست‌نخورده می‌ماند.
+   زیرساخت CC_ و پیش‌نیاز شناسهٔ ثابت سطر فرمول نصب می‌شود.
+   قابل اجرای مکرر: ستون‌های موجود و داده‌های قبلی حفظ می‌شوند.
 
    نکته: عمداً هیچ «USE <database>» اینجا نیست — نام پایگاه در هر
    نصب فرق می‌کند. اسکریپت را روی پایگاه هدف اجرا کنید.
@@ -35,6 +35,13 @@ namespace ScriptSqly.Migrations
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
+GO
+
+-- روی دیتابیس‌های قدیمی، این ستون قبلاً در انتهای آپدیت اضافه می‌شد؛
+-- رویه‌های CC زودتر نصب می‌شوند و از همان ابتدا به آن نیاز دارند.
+IF OBJECT_ID(N'dbo.DTL_MANF',N'U') IS NOT NULL
+    AND COL_LENGTH(N'dbo.DTL_MANF',N'ID') IS NULL
+    ALTER TABLE dbo.DTL_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL;
 GO
 
 /* ───────────────────────── اجرا و گام‌ها ───────────────────────── */
@@ -162,15 +169,23 @@ GO
 IF COL_LENGTH('dbo.CC_Exception','RuleCode') IS NULL
     ALTER TABLE dbo.CC_Exception ADD RuleCode VARCHAR(12) NULL;
 GO
-/* S05 موقع ساختِ CHK-02 مي‌داند مغايرت از نوعِ افتتاحيه است يا نه
-   (CTEهاي MissingOpening/ExtraOpening). تا امروز اين فقط داخلِ متنِ
-   Description مي‌نشست و صفحه‌ي مغايرت‌ها مجبور بود از نو حدس بزند.
-   ⚠️ بدون اين ستون، کوئريِ GetExceptions با «Invalid column name»
-   مي‌افتد و فهرستِ مغايرت‌ها اصلاً باز نمي‌شود. */
+-- نسخهٔ جاری S00 این ستون را قبل از اجرای فایل 13 مصرف می‌کند.
+IF COL_LENGTH('dbo.CC_Exception','RefList') IS NULL
+    ALTER TABLE dbo.CC_Exception ADD RefList NVARCHAR(2000) NULL;
+GO
+/* جهتِ مغایرتِ افتتاحیه، وقتی S05 تشخیصش داده — NULL يعني اين مغايرت
+   ربطي به افتتاحيه ندارد و از گردشِ خودِ ماه است.
+       1 = MissingOpening — کاردکس موجودي اول دوره دارد، سند ندارد
+       2 = ExtraOpening   — سند افتتاحيه هست، کاردکس موجودي اول دوره ندارد
+
+   ⚠️ چرا ستون و نه استنتاجِ دوباره در گزارش: S05 اين را همان‌جا که
+   CHK-02 را مي‌سازد دقيق مي‌داند (CTEهاي MissingOpening/ExtraOpening)،
+   ولي تا امروز نتيجه فقط داخلِ متنِ Description مي‌نشست و دور ريخته
+   مي‌شد. صفحه‌ي مغايرت‌ها مجبور بود خودش از نو حدس بزند و معيارِ
+   ضعيف‌تري داشت. نگاه کنيد CostCloseController.GetExceptions. */
 IF COL_LENGTH('dbo.CC_Exception','OpeningKind') IS NULL
     ALTER TABLE dbo.CC_Exception ADD OpeningKind TINYINT NULL;
 GO
-
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_CC_Exception_Run')
     CREATE INDEX IX_CC_Exception_Run
         ON dbo.CC_Exception(RunId, StepCode, IsResolved, Severity);
@@ -1760,8 +1775,17 @@ BEGIN
             MIN(h.NUMBER),                       -- اولين برگه
             MIN(h.DATE_N),
             SUM(pl.MEGHK),                       -- جمع مقدار توليد متأثر
-            STRING_AGG(CAST(h.NUMBER AS VARCHAR(12)), ', ')
-                WITHIN GROUP (ORDER BY h.NUMBER),
+            -- WITHIN GROUP نیازمند compatibility >= 110 است؛ همان فهرست
+            -- مرتب و با حفظ تکرارها را برای دیتابیس‌های قدیمی نیز می‌سازیم.
+            STUFF((SELECT ', ' + CAST(h2.NUMBER AS VARCHAR(12))
+                FROM dbo.HEAD_LST h2
+                JOIN dbo.INVO_LST pl2 ON pl2.NUMBER = h2.NUMBER AND pl2.TAG = 9
+                WHERE h2.TAG = 9 AND h2.DATE_N BETWEEN @DT1 AND @DT2
+                  AND CAST(pl2.CODE AS BIGINT) = CAST(pl.CODE AS BIGINT)
+                  AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_MANF hm2
+                      WHERE hm2.FNUMB = TRY_CAST(pl2.N_KOL AS INT) AND hm2.GHEYMAT = @Month)
+                ORDER BY h2.NUMBER
+                FOR XML PATH(''), TYPE).value('.', 'varchar(max)'), 1, 2, ''),
             -- اصلاح خودکار فقط وقتي ممکن است که فرمول ماه واقعاً وجود داشته باشد
             CASE WHEN EXISTS (SELECT 1 FROM dbo.HEAD_MANF hm
                               WHERE CAST(hm.CODE AS BIGINT) = CAST(pl.CODE AS BIGINT)
@@ -5846,9 +5870,12 @@ BEGIN
       AND   TRY_CAST(hm.CODE AS BIGINT) IN (@FromParentCode, @ToParentCode)
       AND   p.ProdQty > 0
       AND   (@SelectedFNUMBs IS NULL
-             OR d.FNUMB IN (SELECT TRY_CAST(value AS INT)
-                            FROM   STRING_SPLIT(@SelectedFNUMBs, ',')
-                            WHERE  TRY_CAST(value AS INT) IS NOT NULL));
+             OR d.FNUMB IN (SELECT TRY_CAST(x.Item.value('.', 'nvarchar(4000)') AS INT)
+                FROM (SELECT CAST(N'<i>' + REPLACE(
+                    (SELECT @SelectedFNUMBs AS [text()] FOR XML PATH('')),
+                    N',', N'</i><i>') + N'</i>' AS XML) AS XmlValues) v
+                CROSS APPLY v.XmlValues.nodes('/i') x(Item)
+                WHERE TRY_CAST(x.Item.value('.', 'nvarchar(4000)') AS INT) IS NOT NULL));
 
     IF NOT EXISTS (SELECT 1 FROM #Sel WHERE Dir = -1)
        OR NOT EXISTS (SELECT 1 FROM #Sel WHERE Dir = 1)

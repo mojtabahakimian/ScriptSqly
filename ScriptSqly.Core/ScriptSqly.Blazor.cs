@@ -12,10 +12,15 @@ namespace ScriptSqly.Migrations
         private static void BlazorDbScriptUpdate(SqlConnection db)
         {
             //ذخیره اطلاعات پیش فرض کاربران سمت سرور
-            try { ExecuteMigration(db, @"CREATE TABLE [dbo].[UserState](
+            try { ExecuteMigration(db, @"
+IF OBJECT_ID(N'dbo.UserState',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[UserState](
 								       [UserId]   INT            NOT NULL PRIMARY KEY,
 								       [StateJson] NVARCHAR(MAX) NOT NULL
-								   );"); } catch { }
+								   );
+END;
+"); } catch { }
 
             CrmAclScript(db);
         }

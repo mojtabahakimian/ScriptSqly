@@ -141,13 +141,22 @@ FROM    dbo.TCOD_BANKS INNER JOIN
 
                     try { ExecuteMigration(db, $@"ALTER TABLE PAY_GETD
 									   ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } //برای پشت فاکتور و دریافت چک برای قادر به ذخیره با شرط آیدی
-                    try { ExecuteMigration(db, $@"INSERT INTO dbo.PRICE_PAYNO ([PPID], [PPAME], [TR_DATE], [USERNAME], [MODAT]) VALUES (0, N'آزاد', GETDATE(), N'System', 0);"); } catch { } //برای کمبوباکس نحوه پرداخت ازاد خالی نباشه
+                    try { ExecuteMigration(db, $@"
+INSERT INTO dbo.PRICE_PAYNO ([PPID], [PPAME], [TR_DATE], [USERNAME], [MODAT])
+SELECT seed.[PPID], seed.[PPAME], seed.[TR_DATE], seed.[USERNAME], seed.[MODAT] FROM (VALUES
+(0, N'آزاد', GETDATE(), N'System', 0)
+) AS seed ([PPID], [PPAME], [TR_DATE], [USERNAME], [MODAT])
+WHERE NOT EXISTS (SELECT 1 FROM dbo.PRICE_PAYNO AS target WHERE target.[PPID]=seed.[PPID]);
+"); } catch { } //برای کمبوباکس نحوه پرداخت ازاد خالی نباشه
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.MODULE_D ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } //برای سایر واحد ها قابل آپدیت کردن با آیدی
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TAKHPERS ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[DEFAULTDEP](
+                    try { ExecuteMigration(db, $@"
+IF OBJECT_ID(N'dbo.DEFAULTDEP',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[DEFAULTDEP](
 	[TFSAZMAN] [int] NULL,
 	[SHIFT] [int] NULL,
 	[USERID] [int] NOT NULL,
@@ -158,7 +167,10 @@ FROM    dbo.TCOD_BANKS INNER JOIN
 	[USERID] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
-ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.DEFAULTDEP') AND name=N'CRT' AND default_object_id<>0)
+ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]
+"); } catch { }
 
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MAP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
@@ -167,9 +179,10 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.AZAE ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { ExecuteMigration(db, $@"INSERT INTO GSCADTL ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])
-									VALUES
-									( 1, N'عالی', 100, 0, 0, 1 ), 
+                    try { ExecuteMigration(db, $@"
+INSERT INTO GSCADTL ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])
+SELECT seed.[GSCADTCOD], seed.[GSCANAME], seed.[GSCAGRADE], seed.[GSCAFROM], seed.[GSCATO], seed.[GSCACOD] FROM (VALUES
+( 1, N'عالی', 100, 0, 0, 1 ),
 									( 2, N'خیلی خوب', 83, 0, 0, 1 ), 
 									( 3, N'خوب', 66, 0, 0, 1 ), 
 									( 4, N'متوسط', 50, 0, 0, 1 ), 
@@ -275,7 +288,10 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 									( 104, N'متوسط', 500, 0, 0, 12 ), 
 									( 105, N'ضعیف', 330, 0, 0, 12 ), 
 									( 106, N'خیلی ضعیف', 160, 0, 0, 12 ), 
-									( 107, N'بد', 0, 0, 0, 12 )"); } catch { }
+									( 107, N'بد', 0, 0, 0, 12 )
+) AS seed ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])
+WHERE NOT EXISTS (SELECT 1 FROM GSCADTL AS target WHERE target.[GSCADTCOD]=seed.[GSCADTCOD]);
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TOTA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { } // سرفصل حساب های کل
 
@@ -283,7 +299,10 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
-                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[TR_PAY_GETD]
+                    try { ExecuteMigration(db, $@"
+IF OBJECT_ID(N'dbo.TR_PAY_GETD',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[TR_PAY_GETD]
 									(
 									[N_SERI] [float] NULL,
 									[BANK] [int] NULL,
@@ -326,9 +345,14 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 									[PC_NAME] [nvarchar] (50) COLLATE Arabic_CI_AS NULL,
 									[IPADD] [nvarchar] (50) COLLATE Arabic_CI_AS NULL,
 									[TRIDD] [int] NOT NULL IDENTITY(1, 1)
-									) ON [PRIMARY] "); } catch { }
+									) ON [PRIMARY]
+END;
+"); } catch { }
 
-                    try { ExecuteMigration(db, $@" ALTER TABLE [dbo].[TR_PAY_GETD] ADD CONSTRAINT [PK__TR_PAY_G__9FFE4EA46E02EDDB] PRIMARY KEY CLUSTERED ([TRIDD]) ON [PRIMARY]"); } catch { }
+                    try { ExecuteMigration(db, $@"
+IF NOT EXISTS (SELECT 1 FROM sys.key_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.TR_PAY_GETD') AND type='PK')
+ALTER TABLE [dbo].[TR_PAY_GETD] ADD CONSTRAINT [PK__TR_PAY_G__9FFE4EA46E02EDDB] PRIMARY KEY CLUSTERED ([TRIDD]) ON [PRIMARY]
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
@@ -410,7 +434,7 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]"); } catch { }
 
                     try { ExecuteMigration(db, @"
 INSERT INTO dbo.TCOD_ARZ ([Code], [Title], [ISOCode], [CountryName])
-VALUES
+SELECT seed.[Code], seed.[Title], seed.[ISOCode], seed.[CountryName] FROM (VALUES
 (965, N'ADB Unit of Account', N'XUA', N'MEMBER COUNTRIES OF THE AFRICAN DEVELOPMENT BANK'),
 (971, N'Afghani', N'AFN', N'AFGHANISTAN'),
 (8,   N'Lek', N'ALL', N'ALBANIA'),
@@ -588,7 +612,10 @@ VALUES
 (960, N'SDR (Special Drawing Right)', N'XDR', N'INTERNATIONAL MONETARY FUND (IMF)'),
 (963, N'Codes specifically reserved for testing purposes', N'XTS', N'ZZ06_Testing_Code'),
 (999, N'Codes for transactions with no currency involved', N'XXX', N'ZZ07_No_Currency'),
-(951, N'East Caribbean Dollar', N'XCD', N'ANGUILLA'); "); } catch { }
+(951, N'East Caribbean Dollar', N'XCD', N'ANGUILLA')
+) AS seed ([Code], [Title], [ISOCode], [CountryName])
+WHERE NOT EXISTS (SELECT 1 FROM dbo.TCOD_ARZ AS target WHERE target.[Code]=seed.[Code]);
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_ARZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
@@ -631,7 +658,10 @@ VALUES
 									END "); } catch { }
 
                     //لاگ حذف کردن
-                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[USER_AUDIT_LOG](
+                    try { ExecuteMigration(db, $@"
+IF OBJECT_ID(N'dbo.USER_AUDIT_LOG',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[USER_AUDIT_LOG](
 										[ID] [BIGINT] IDENTITY(1,1) NOT NULL,
 										[UserName] [NVARCHAR](100) NOT NULL,
 										[WindowsUserName] [NVARCHAR](100) NULL,
@@ -656,9 +686,14 @@ VALUES
 									(
 										[ID] ASC
 									)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-									) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY] "); } catch { }
+									) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+END;
+"); } catch { }
 
-                    try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[USER_AUDIT_LOG] ADD  DEFAULT ((1)) FOR [IsSuccess]"); } catch { }
+                    try { ExecuteMigration(db, $@"
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.USER_AUDIT_LOG') AND name=N'IsSuccess' AND default_object_id<>0)
+ALTER TABLE [dbo].[USER_AUDIT_LOG] ADD  DEFAULT ((1)) FOR [IsSuccess]
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE [dbo].[PAY_GETD] ALTER COLUMN [NAME_TAH] NVARCHAR(200) NULL"); } catch { }
 
@@ -779,7 +814,10 @@ VALUES
                     catch { }
 
 
-                    try { ExecuteMigration(db, $@"CREATE TABLE [dbo].[CustomerComplaints](
+                    try { ExecuteMigration(db, $@"
+IF OBJECT_ID(N'dbo.CustomerComplaints',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[CustomerComplaints](
 								    [ComplaintID] [int] IDENTITY(1,1) NOT NULL PRIMARY KEY,
 								    [CustomerFirstName] [nvarchar](100) NOT NULL,
 								    [CustomerLastName] [nvarchar](100) NOT NULL,
@@ -816,13 +854,18 @@ VALUES
 								    [InformationConfirmed] [bit] NOT NULL DEFAULT 0,
 								    [SubmissionTimestamp] [datetime2](7) NOT NULL DEFAULT GETDATE(),
 								    [ComplaintStatus] [nvarchar](50) NOT NULL DEFAULT N'جدید' -- e.g., جدید، در حال بررسی، بررسی شده، بسته شده
-								   ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];"); } catch { }
+								   ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+END;
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_LST ALTER COLUMN SHARAYET NVARCHAR(MAX)"); } catch { }
 
                     //New 1
                     {
-                        string script = @"CREATE TABLE [dbo].[InvoiceRewards](
+                        string script = @"
+IF OBJECT_ID(N'dbo.InvoiceRewards',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[InvoiceRewards](
 											[InvoiceRewardID] [bigint] IDENTITY(1,1) NOT NULL,
 											[InvoiceNumber] [float] NOT NULL,
 											[InvoiceTag] [float] NOT NULL,
@@ -843,26 +886,27 @@ VALUES
 											[InvoiceRewardID] ASC
 										)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
 										) ON [PRIMARY]
-										
+END;
 										GO
-										
-										ALTER TABLE [dbo].[InvoiceRewards]  WITH CHECK ADD  CONSTRAINT [FK_InvoiceRewards_HEAD_LST] FOREIGN KEY([InvoiceNumber], [InvoiceTag])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.InvoiceRewards') AND name=N'FK_InvoiceRewards_HEAD_LST')
+ALTER TABLE [dbo].[InvoiceRewards]  WITH CHECK ADD  CONSTRAINT [FK_InvoiceRewards_HEAD_LST] FOREIGN KEY([InvoiceNumber], [InvoiceTag])
 										REFERENCES [dbo].[HEAD_LST] ([NUMBER], [TAG])
 										GO
 										
 										ALTER TABLE [dbo].[InvoiceRewards] CHECK CONSTRAINT [FK_InvoiceRewards_HEAD_LST]
 										GO
-										
-										ALTER TABLE [dbo].[InvoiceRewards]  WITH CHECK ADD  CONSTRAINT [FK_InvoiceRewards_RewardRule] FOREIGN KEY([RewardRuleID])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.InvoiceRewards') AND name=N'FK_InvoiceRewards_RewardRule')
+ALTER TABLE [dbo].[InvoiceRewards]  WITH CHECK ADD  CONSTRAINT [FK_InvoiceRewards_RewardRule] FOREIGN KEY([RewardRuleID])
 										REFERENCES [dbo].[RewardRules] ([RuleID])
 										GO
 										
 										ALTER TABLE [dbo].[InvoiceRewards] CHECK CONSTRAINT [FK_InvoiceRewards_RewardRule]
 										GO
-										
-										ALTER TABLE [dbo].[InvoiceRewards] ADD  CONSTRAINT [DF__InvoiceRewa__CRT__268ACAE1]  DEFAULT (getdate()) FOR [CRT]";
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.InvoiceRewards') AND name=N'CRT' AND default_object_id<>0)
+ALTER TABLE [dbo].[InvoiceRewards] ADD  CONSTRAINT [DF__InvoiceRewa__CRT__268ACAE1]  DEFAULT (getdate()) FOR [CRT]
+";
 
-                        var commands = script.Split(new string[] { "GO\r\n", "GO ", "GO\t" }, StringSplitOptions.RemoveEmptyEntries);
+                        var commands = System.Text.RegularExpressions.Regex.Split(script, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         foreach (var cmdText in commands)
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
@@ -874,7 +918,10 @@ VALUES
 
                     //New 2
                     {
-                        string script = @"CREATE TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION](
+                        string script = @"
+IF OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION](
 									[EXCEPTION_ID] [int] IDENTITY(1,1) NOT NULL,
 									[PETID] [int] NOT NULL,
 									[CODE] [nvarchar](15) NOT NULL,
@@ -894,35 +941,38 @@ VALUES
 									[CODE] ASC
 								)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
 								) ON [PRIMARY]
+END;
 								GO
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION]  WITH CHECK ADD  CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_DTL] FOREIGN KEY([PETID])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'FK_PRICE_ELAMIETF_EXCEPTION_DTL')
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION]  WITH CHECK ADD  CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_DTL] FOREIGN KEY([PETID])
 								REFERENCES [dbo].[PRICE_ELAMIETF_DTL] ([PETID])
 								ON UPDATE CASCADE
 								GO
 								
 								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] CHECK CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_DTL]
 								GO
-
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION]  WITH CHECK ADD  CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_STUF] FOREIGN KEY([CODE])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'FK_PRICE_ELAMIETF_EXCEPTION_STUF')
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION]  WITH CHECK ADD  CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_STUF] FOREIGN KEY([CODE])
 								REFERENCES [dbo].[STUF_DEF] ([CODE])
 								ON UPDATE CASCADE
 								GO
 								
 								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] CHECK CONSTRAINT [FK_PRICE_ELAMIETF_EXCEPTION_STUF]
 								GO
-								
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TF1]  DEFAULT ((0)) FOR [EXCEPTION_TF1]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'EXCEPTION_TF1' AND default_object_id<>0)
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TF1]  DEFAULT ((0)) FOR [EXCEPTION_TF1]
 								GO
-								
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TF2]  DEFAULT ((0)) FOR [EXCEPTION_TF2]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'EXCEPTION_TF2' AND default_object_id<>0)
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TF2]  DEFAULT ((0)) FOR [EXCEPTION_TF2]
 								GO
-								
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TR_DATE]  DEFAULT (getdate()) FOR [TR_DATE]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'TR_DATE' AND default_object_id<>0)
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_TR_DATE]  DEFAULT (getdate()) FOR [TR_DATE]
 								GO
-								
-								ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_CRT]  DEFAULT (getdate()) FOR [CRT]";
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.PRICE_ELAMIETF_EXCEPTION') AND name=N'CRT' AND default_object_id<>0)
+ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_EXCEPTION_CRT]  DEFAULT (getdate()) FOR [CRT]
+";
 
-                        var commands = script.Split(new string[] { "GO\r\n", "GO ", "GO\t" }, StringSplitOptions.RemoveEmptyEntries);
+                        var commands = System.Text.RegularExpressions.Regex.Split(script, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         foreach (var cmdText in commands)
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
@@ -936,7 +986,10 @@ VALUES
 
                     //New 3
                     {
-                        string script = @"CREATE TABLE [dbo].[RewardRules](
+                        string script = @"
+IF OBJECT_ID(N'dbo.RewardRules',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[RewardRules](
 									  	[RuleID] [int] IDENTITY(1,1) NOT NULL,
 									  	[ProductID_Target] [nvarchar](15) NOT NULL,
 									  	[Quantity_Threshold] [int] NOT NULL,
@@ -955,33 +1008,33 @@ VALUES
 									  	[RuleID] ASC
 									  )WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
 									  ) ON [PRIMARY]
-									  
+END;
 									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_ProductID_Target] FOREIGN KEY([ProductID_Target])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_ProductID_Target')
+ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_ProductID_Target] FOREIGN KEY([ProductID_Target])
 									  REFERENCES [dbo].[STUF_DEF] ([CODE])
 									  GO
 									  
 									  ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_ProductID_Target]
 									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_Reward_ProductID] FOREIGN KEY([Reward_ProductID])
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_Reward_ProductID')
+ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_Reward_ProductID] FOREIGN KEY([Reward_ProductID])
 									  REFERENCES [dbo].[STUF_DEF] ([CODE])
 									  GO
 									  
 									  ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_Reward_ProductID]
 									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF_RewardRules_Reward_Type]  DEFAULT (N'محصول') FOR [Reward_Type]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'Reward_Type' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF_RewardRules_Reward_Type]  DEFAULT (N'محصول') FOR [Reward_Type]
 									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRul__IsAct__1DF584E0]  DEFAULT ((1)) FOR [IsActive]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'IsActive' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRul__IsAct__1DF584E0]  DEFAULT ((1)) FOR [IsActive]
 									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRules__CRT__1EE9A919]  DEFAULT (getdate()) FOR [CRT]
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'CRT' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRules__CRT__1EE9A919]  DEFAULT (getdate()) FOR [CRT]
 									  GO";
 
-                        var commands = script.Split(new string[] { "GO\r\n", "GO ", "GO\t" }, StringSplitOptions.RemoveEmptyEntries);
+                        var commands = System.Text.RegularExpressions.Regex.Split(script, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         foreach (var cmdText in commands)
                         {
                             if (!string.IsNullOrWhiteSpace(cmdText))
@@ -1819,11 +1872,16 @@ VALUES
                     #endregion
 
                     //جدولی برای ثبت تریتب کاربران برای ارجاع
-                    try { ExecuteMigration(db, @"CREATE TABLE USER_PERSONEL_ORDER (
+                    try { ExecuteMigration(db, @"
+IF OBJECT_ID(N'dbo.USER_PERSONEL_ORDER',N'U') IS NULL
+BEGIN
+CREATE TABLE USER_PERSONEL_ORDER (
 									USER_ID      INT        NOT NULL,
 									PERSONEL_ID  INT        NOT NULL,
 									SORT_ORDER   INT        NOT NULL,
-									PRIMARY KEY (USER_ID, PERSONEL_ID))"); } catch { }
+									PRIMARY KEY (USER_ID, PERSONEL_ID))
+END;
+"); } catch { }
 
                     //بررسی مالکیت فاکتور و محاسبه پورسانت به صورت هوشمند
                     //این بخش عمداً فقط با اجرای دستیِ اسکریپت (isCustomCall = true) فعال می‌شود، نه با
@@ -2499,11 +2557,14 @@ END;
 
 
                     //Super Fast Index for Automation MAIN
-                    try { ExecuteMigration(db, $@"CREATE NONCLUSTERED INDEX IX_TASKS_Status1
+                    try { ExecuteMigration(db, $@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.TASKS') AND name=N'IX_TASKS_Status1')
+CREATE NONCLUSTERED INDEX IX_TASKS_Status1
 									ON dbo.TASKS (STATUS, IDNUM)          -- برای فیلتر و ORDER BY
 									INCLUDE (GR, PERSONEL, TASK, PERIORITY, STDATE, STTIME,
 									         ENDATE, ENTIME, USERNAME, COMP_COD, SUMTIME,
-									          ss, skid, num, tg, CTIM, USERCO, SEE)"); } catch { }
+									          ss, skid, num, tg, CTIM, USERCO, SEE)
+"); } catch { }
 
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.VISITOR_DTL ADD LOG NVARCHAR(4000) NULL"); } catch { }
@@ -2767,13 +2828,18 @@ END");
 									)"); } catch { }
 
                     //تنظیمات عمومی بیشتر
-                    try { ExecuteMigration(db, @"CREATE TABLE [dbo].[GENERAL_OPTIONS] (
+                    try { ExecuteMigration(db, @"
+IF OBJECT_ID(N'dbo.GENERAL_OPTIONS',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[GENERAL_OPTIONS] (
 								       [OptionName]  NVARCHAR(100) PRIMARY KEY NOT NULL,
 								       [OptionValue] NVARCHAR(500) NULL,
 								       [Description] NVARCHAR(1000) NULL,
 								       [LastUpdated] DATETIME DEFAULT GETDATE()
 				
-								   );"); } catch { }
+								   );
+END;
+"); } catch { }
 
                     //اضافه کردن ستون CRT (تاریخ ایجاد) به GENERAL_OPTIONS
                     try { ExecuteMigration(db, @"ALTER TABLE [dbo].[GENERAL_OPTIONS]
@@ -2878,8 +2944,12 @@ END");
                     catch { }
 
                     //اتوماسیون
-                    try { ExecuteMigration(db, @"ALTER TABLE MESAGEP ADD SNOOZE_COUNT INT DEFAULT 0 
-								   ALTER TABLE MESAGEP ADD LAST_NOTIFY_TIME DATETIME NULL"); } catch { }
+                    try { ExecuteMigration(db, @"
+IF COL_LENGTH(N'dbo.MESAGEP',N'SNOOZE_COUNT') IS NULL
+ALTER TABLE dbo.MESAGEP ADD SNOOZE_COUNT INT DEFAULT 0;
+IF COL_LENGTH(N'dbo.MESAGEP',N'LAST_NOTIFY_TIME') IS NULL
+ALTER TABLE dbo.MESAGEP ADD LAST_NOTIFY_TIME DATETIME NULL;
+"); } catch { }
 
                     //مرکز هزینه
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MARKAZHAZ ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
@@ -3176,9 +3246,10 @@ END");
                     }
 
                     //ایجاد داده های مربوط به لیست کشور ها
-                    try { ExecuteMigration(db, $@"INSERT INTO TCOD_Countries ([Code], [CountriesName], [CodeIcon], [THREE_LETTER_CODE])
-						                VALUES
-						                ( 100001, N'آرژانتین', 64, N'ARG' ), 
+                    try { ExecuteMigration(db, $@"
+INSERT INTO TCOD_Countries ([Code], [CountriesName], [CodeIcon], [THREE_LETTER_CODE])
+SELECT seed.[Code], seed.[CountriesName], seed.[CodeIcon], seed.[THREE_LETTER_CODE] FROM (VALUES
+( 100001, N'آرژانتین', 64, N'ARG' ),
 						                ( 100002, N'آروبا', 75, N'ABW' ), 
 						                ( 100003, N'آفریقای جنوبی', 66, N'ZAF' ), 
 						                ( 100004, N'آفریقای مرکزی', 65, N'CAF' ), 
@@ -3385,7 +3456,9 @@ END");
 						                ( 100215, N'سازمان ملل متحد', 205, N'UNO' ), 
 						                ( 100216, N'سنت وینسنت', 205, N'VCT' ), 
 						                ( 100217, N'تیمور شرقی', 205, NULL )
-						                "); } catch { }
+) AS seed ([Code], [CountriesName], [CodeIcon], [THREE_LETTER_CODE])
+WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=seed.[Code]);
+"); } catch { }
 
                     try
                     {
@@ -3728,13 +3801,17 @@ END");
 									    );
 									END"); } catch { }
 
-                    try { ExecuteMigration(db, @"CREATE TABLE [dbo].[Travelreason]
+                    try { ExecuteMigration(db, @"
+IF OBJECT_ID(N'dbo.Travelreason',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[Travelreason]
 (
 [Code] [int] NULL,
 [TravelreasonName] [nvarchar] (25) COLLATE Arabic_CI_AS NULL,
 [CRT] [datetime] NULL CONSTRAINT [DF__Travelreaso__CRT__5E7FE7D2] DEFAULT (getdate()),
 [UID] [int] NULL
 ) ON [PRIMARY]
+END;
 "); } catch { }
 
                     //1405/01/08

@@ -39,7 +39,10 @@ public static partial class ScriptSqly
     private static MigrationExecutionResult Track(string connectionString, Action<SqlConnection> action,
         Action<MigrationStep>? progress)
     {
-        using var gateConnection = new SqlConnection(connectionString);
+        // A physical close must release the session lock even if explicit
+        // cleanup fails. Do not return the lock-owning session to the pool.
+        var gateSettings = new SqlConnectionStringBuilder(connectionString) { Pooling = false };
+        using var gateConnection = new SqlConnection(gateSettings.ConnectionString);
         gateConnection.Open();
         var acquired = gateConnection.ExecuteScalar<int>(@"
 DECLARE @result int;
@@ -84,6 +87,12 @@ SELECT @result;");
         return first.Trim()[..Math.Min(first.Trim().Length, 140)];
     }
 
+    // Only a complete, simple single-column ADD is safe to skip. In particular,
+    // an ADD with several columns or a following DDL command must still execute
+    // and report its error rather than silently omitting unfinished work.
+    private static readonly Regex SingleColumnAdd = new(@"\A\s*ALTER\s+TABLE\s+(?<table>[\w.\[\]]+)\s+ADD\s+(?<column>[\w\[\]]+)\s+[\w.\[\]]+(?:\s*\(\s*(?:MAX|\d+(?:\s*,\s*\d+)?)\s*\))?(?:\s+(?:NOT\s+NULL|NULL|IDENTITY\s*\(\s*\d+\s*,\s*\d+\s*\)|COLLATE\s+\w+|DEFAULT\s+\(?\s*(?:-?\d+(?:\.\d+)?|N?'(?:''|[^'])*'|GETDATE\(\))\s*\)?))*\s*;?\s*\z",
+        RegexOptions.IgnoreCase);
+
     // Every Dapper Execute in the migration engine passes through this method.
     // Legacy callers keep their original behavior; tracked runs collect even the
     // exceptions that old catch blocks swallow, and report per-command progress.
@@ -114,14 +123,12 @@ SELECT @result;");
             }
 
             // A repeated single-column ADD needs no schema lock or expected exception.
-            var add = Regex.Match(sql, @"\A\s*ALTER\s+TABLE\s+(?<table>[\w.\[\]]+)\s+ADD\s+(?<column>[\w\[\]]+)\s+", RegexOptions.IgnoreCase);
+            var add = SingleColumnAdd.Match(sql);
             if (add.Success && !add.Groups["column"].Value.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase))
             {
                 var exists = db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH(@table,@column) IS NULL THEN 0 ELSE 1 END",
                     new { table = add.Groups["table"].Value.Replace("[", "").Replace("]", ""), column = add.Groups["column"].Value.Trim('[', ']') }, transaction);
-                // Only skip a single ADD statement: a multi-statement batch may also add missing columns.
-                if (exists == 1 && Regex.Matches(sql, @"\bALTER\s+TABLE\b", RegexOptions.IgnoreCase).Count == 1
-                    && !sql.Trim().TrimEnd(';').Contains(';') && !Regex.IsMatch(sql, @"\b(?:UPDATE|INSERT|DELETE|EXEC)\b", RegexOptions.IgnoreCase))
+                if (exists == 1)
                 {
                     context.Result.Skipped++;
                     context.Progress?.Invoke(new(number, label, "skipped", timer.ElapsedMilliseconds));

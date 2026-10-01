@@ -14,6 +14,13 @@ namespace ScriptSqly.Migrations
         /// </summary>
         public static void LetsGo(string connectionString, bool isCustomCall = false, int _type_ = -1)
         {
+            // Legacy runners use this entry point too. Acquire the same lock
+            // before any database changes; the tracked call re-enters here.
+            if (CurrentExecution.Value is null)
+            {
+                RunTracked(connectionString, isCustomCall, _type_);
+                return;
+            }
             using (var db = new SqlConnection(connectionString))
             {
                 db.Open();
@@ -860,6 +867,66 @@ END;
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.HEAD_LST ALTER COLUMN SHARAYET NVARCHAR(MAX)"); } catch { }
 
+                    //New 3
+                    {
+                        string script = @"
+IF OBJECT_ID(N'dbo.RewardRules',N'U') IS NULL
+BEGIN
+CREATE TABLE [dbo].[RewardRules](
+                                        [RuleID] [int] IDENTITY(1,1) NOT NULL,
+                                        [ProductID_Target] [nvarchar](15) NOT NULL,
+                                        [Quantity_Threshold] [int] NOT NULL,
+                                        [Reward_Type] [nvarchar](50) NOT NULL,
+                                        [Reward_ProductID] [nvarchar](15) NOT NULL,
+                                        [Reward_Quantity] [int] NULL,
+                                        [Reward_Discount_Percentage] [decimal](5, 2) NULL,
+                                        [IsActive] [bit] NOT NULL,
+                                        [StartDate] [bigint] NULL,
+                                        [EndDate] [bigint] NULL,
+                                        [Description] [nvarchar](200) NULL,
+                                        [CRT] [datetime] NULL,
+                                        [UID] [int] NULL,
+                                       CONSTRAINT [PK__RewardRu__110458C21C0D3C6E] PRIMARY KEY CLUSTERED
+                                      (
+                                        [RuleID] ASC
+                                      )WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
+                                      ) ON [PRIMARY]
+END;
+                                      GO
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_ProductID_Target')
+ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_ProductID_Target] FOREIGN KEY([ProductID_Target])
+                                      REFERENCES [dbo].[STUF_DEF] ([CODE])
+                                      GO
+
+                                      ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_ProductID_Target]
+                                      GO
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_Reward_ProductID')
+ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_Reward_ProductID] FOREIGN KEY([Reward_ProductID])
+                                      REFERENCES [dbo].[STUF_DEF] ([CODE])
+                                      GO
+
+                                      ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_Reward_ProductID]
+                                      GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'Reward_Type' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF_RewardRules_Reward_Type]  DEFAULT (N'محصول') FOR [Reward_Type]
+                                      GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'IsActive' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRul__IsAct__1DF584E0]  DEFAULT ((1)) FOR [IsActive]
+                                      GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'CRT' AND default_object_id<>0)
+ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRules__CRT__1EE9A919]  DEFAULT (getdate()) FOR [CRT]
+                                      GO";
+
+                        var commands = System.Text.RegularExpressions.Regex.Split(script, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        foreach (var cmdText in commands)
+                        {
+                            if (!string.IsNullOrWhiteSpace(cmdText))
+                            {
+                                try { ExecuteMigration(db, cmdText); } catch { }
+                            }
+                        }
+                    }
+
                     //New 1
                     {
                         string script = @"
@@ -983,66 +1050,6 @@ ALTER TABLE [dbo].[PRICE_ELAMIETF_EXCEPTION] ADD  CONSTRAINT [DF_PRICE_ELAMIETF_
                     }
 
                     //توابع قیمت گذاری از طریق استور پروسیجر
-
-                    //New 3
-                    {
-                        string script = @"
-IF OBJECT_ID(N'dbo.RewardRules',N'U') IS NULL
-BEGIN
-CREATE TABLE [dbo].[RewardRules](
-									  	[RuleID] [int] IDENTITY(1,1) NOT NULL,
-									  	[ProductID_Target] [nvarchar](15) NOT NULL,
-									  	[Quantity_Threshold] [int] NOT NULL,
-									  	[Reward_Type] [nvarchar](50) NOT NULL,
-									  	[Reward_ProductID] [nvarchar](15) NOT NULL,
-									  	[Reward_Quantity] [int] NULL,
-									  	[Reward_Discount_Percentage] [decimal](5, 2) NULL,
-									  	[IsActive] [bit] NOT NULL,
-									  	[StartDate] [bigint] NULL,
-									  	[EndDate] [bigint] NULL,
-									  	[Description] [nvarchar](200) NULL,
-									  	[CRT] [datetime] NULL,
-									  	[UID] [int] NULL,
-									   CONSTRAINT [PK__RewardRu__110458C21C0D3C6E] PRIMARY KEY CLUSTERED 
-									  (
-									  	[RuleID] ASC
-									  )WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
-									  ) ON [PRIMARY]
-END;
-									  GO
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_ProductID_Target')
-ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_ProductID_Target] FOREIGN KEY([ProductID_Target])
-									  REFERENCES [dbo].[STUF_DEF] ([CODE])
-									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_ProductID_Target]
-									  GO
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE parent_object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'FK_RewardRules_Reward_ProductID')
-ALTER TABLE [dbo].[RewardRules]  WITH CHECK ADD  CONSTRAINT [FK_RewardRules_Reward_ProductID] FOREIGN KEY([Reward_ProductID])
-									  REFERENCES [dbo].[STUF_DEF] ([CODE])
-									  GO
-									  
-									  ALTER TABLE [dbo].[RewardRules] CHECK CONSTRAINT [FK_RewardRules_Reward_ProductID]
-									  GO
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'Reward_Type' AND default_object_id<>0)
-ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF_RewardRules_Reward_Type]  DEFAULT (N'محصول') FOR [Reward_Type]
-									  GO
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'IsActive' AND default_object_id<>0)
-ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRul__IsAct__1DF584E0]  DEFAULT ((1)) FOR [IsActive]
-									  GO
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.RewardRules') AND name=N'CRT' AND default_object_id<>0)
-ALTER TABLE [dbo].[RewardRules] ADD  CONSTRAINT [DF__RewardRules__CRT__1EE9A919]  DEFAULT (getdate()) FOR [CRT]
-									  GO";
-
-                        var commands = System.Text.RegularExpressions.Regex.Split(script, @"^[ \t]*GO[ \t]*;?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        foreach (var cmdText in commands)
-                        {
-                            if (!string.IsNullOrWhiteSpace(cmdText))
-                            {
-                                try { ExecuteMigration(db, cmdText); } catch { }
-                            }
-                        }
-                    }
 
                     // CREATE OR ALTER below preserves the existing procedure if compilation fails.
                     try { ExecuteMigration(db, $@"CREATE OR ALTER PROCEDURE [dbo].[sp_UpdateInvoicePricingAndDiscount]
@@ -2842,11 +2849,13 @@ END;
 "); } catch { }
 
                     //اضافه کردن ستون CRT (تاریخ ایجاد) به GENERAL_OPTIONS
-                    try { ExecuteMigration(db, @"ALTER TABLE [dbo].[GENERAL_OPTIONS]
+                    try { ExecuteMigration(db, @"IF COL_LENGTH(N'dbo.GENERAL_OPTIONS',N'CRT') IS NULL
+                                   ALTER TABLE [dbo].[GENERAL_OPTIONS]
                                    ADD [CRT] DATETIME NULL
                                    CONSTRAINT [DF__GENERAL_OPT__CRT__2C3B9588] DEFAULT (GETDATE());"); } catch { }
                     //اضافه کردن ستون UID (کد کاربر) به GENERAL_OPTIONS برای تنظیمات per-user
-                    try { ExecuteMigration(db, @"ALTER TABLE [dbo].[GENERAL_OPTIONS]
+                    try { ExecuteMigration(db, @"IF COL_LENGTH(N'dbo.GENERAL_OPTIONS',N'UID') IS NULL
+                                   ALTER TABLE [dbo].[GENERAL_OPTIONS]
                                    ADD [UID] bigint NULL;"); } catch { }
 
 
@@ -3029,81 +3038,8 @@ ALTER TABLE dbo.MESAGEP ADD LAST_NOTIFY_TIME DATETIME NULL;
                         END");
                         }
                         catch { }
-                        // 3. ایجاد SQL Server Agent Job برای اجرای خودکار پروسیجر (هر 1 ساعت)
-                        try
-                        {
-                            ExecuteMigration(db, @"
-                        -- پاکسازی جاب قدیمی در صورت وجود
-                        IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs WHERE name = N'CheckReservationTimeout')
-                        BEGIN
-                            EXEC msdb.dbo.sp_delete_job @job_name = N'CheckReservationTimeout', @delete_unused_schedule = 1;
-                        END");
-                        }
-                        catch { }
-
-                        try
-                        {
-                            ExecuteMigration(db, @"
-                        DECLARE @ReturnCode INT = 0;
-                        DECLARE @JobId BINARY(16);
-						DECLARE @DbName NVARCHAR(128) = DB_NAME();
-                        -- ایجاد دسته‌بندی در صورت نیاز
-                        IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name = N'[Uncategorized (Local)]' AND category_class = 1)
-                        BEGIN
-                            EXEC @ReturnCode = msdb.dbo.sp_add_category @class = N'JOB', @type = N'LOCAL', @name = N'[Uncategorized (Local)]';
-                        END
-                        -- تعریف مشخصات اصلی جاب
-                        EXEC @ReturnCode = msdb.dbo.sp_add_job
-                            @job_name = N'CheckReservationTimeout',
-                            @enabled = 1,
-                            @notify_level_eventlog = 0,
-                            @notify_level_email = 0,
-                            @notify_level_netsend = 0,
-                            @notify_level_page = 0,
-                            @delete_level = 0,
-                            @description = N'بررسی و لغو خودکار رزروهای منقضی شده (بیش از 96 ساعت).',
-                            @category_name = N'[Uncategorized (Local)]',
-                            @owner_login_name = N'sa',
-                            @job_id = @JobId OUTPUT;
-                        -- تعریف مرحله اجرایی
-                        EXEC @ReturnCode = msdb.dbo.sp_add_jobstep
-                            @job_id = @JobId,
-                            @step_name = N'Execute SP CheckReservationTimeout',
-                            @step_id = 1,
-                            @cmdexec_success_code = 0,
-                            @on_success_action = 1,
-                            @on_success_step_id = 0,
-                            @on_fail_action = 2,
-                            @on_fail_step_id = 0,
-                            @retry_attempts = 2,
-                            @retry_interval = 5,
-                            @os_run_priority = 0,
-                            @subsystem = N'TSQL',
-                            @command = N'EXEC [dbo].[sp_CheckReservationTimeout]',
-                            @database_name = @DbName,
-                            @flags = 0;
-                        -- تنظیم استپ شروع
-                        EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @JobId, @start_step_id = 1;
-                        -- تعریف زمان‌بندی - هر 1 ساعت
-                        EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule
-                            @job_id = @JobId,
-                            @name = N'Hourly Schedule',
-                            @enabled = 1,
-                            @freq_type = 4,
-                            @freq_interval = 1,
-                            @freq_subday_type = 8,
-                            @freq_subday_interval = 1,
-                            @freq_relative_interval = 0,
-                            @freq_recurrence_factor = 0,
-                            @active_start_date = 20240101,
-                            @active_end_date = 99991231,
-                            @active_start_time = 0,
-                            @active_end_time = 235959;
-                        -- اختصاص جاب به سرور محلی
-                        EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @JobId, @server_name = N'(local)';
-                    ");
-                        }
-                        catch { }
+                        // SQL Agent jobs are global to the instance; preserve each database's job.
+                        try { ReservationTimeoutJobScript(db); } catch { }
                     }
 
                     //تعریف پورسانت ویزیتور

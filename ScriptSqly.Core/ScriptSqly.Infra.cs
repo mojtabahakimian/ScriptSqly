@@ -37,7 +37,7 @@ namespace ScriptSqly.Migrations
                     try
                     {
                         string test = cmdText;
-                        db.Execute(cmdText, transaction: transaction);
+                        ExecuteMigration(db, cmdText, transaction: transaction);
                     }
                     catch (SqlException ex)
                     {

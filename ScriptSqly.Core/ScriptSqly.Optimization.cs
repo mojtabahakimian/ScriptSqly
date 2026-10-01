@@ -45,7 +45,7 @@ namespace ScriptSqly.Migrations
             {
                 //بازسازی یک ایندکس ۳۳۵ مگابایتی از مهلت پیش‌فرض ۳۰ ثانیه رد می‌شود؛
                 //بدون این، روی دیتابیس بزرگ timeout می‌خورد و کاربر خبردار نمی‌شود.
-                db.Execute(commandTimeout: 3600, sql: @"
+                ExecuteMigration(db, commandTimeout: 3600, sql: @"
 IF OBJECT_ID(N'dbo.DEED_DTL', N'U') IS NOT NULL
    AND COL_LENGTH(N'dbo.DEED_DTL', N'BED') IS NOT NULL
    AND COL_LENGTH(N'dbo.DEED_DTL', N'BES') IS NOT NULL
@@ -90,7 +90,7 @@ END");
             try
             {
                 // بهینه‌سازی کلید صعودی (OPTIMIZE_FOR_SEQUENTIAL_KEY) برای SQL Server 2019+
-                db.Execute(@"
+                ExecuteMigration(db, @"
 IF TRY_CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) >= 15
 BEGIN
     DECLARE @sql NVARCHAR(MAX) = N'';

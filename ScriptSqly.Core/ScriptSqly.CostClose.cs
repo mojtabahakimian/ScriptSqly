@@ -2420,6 +2420,26 @@ BEGIN
     WHERE   il.TAG IN (2, 5, 8, 10, 11, 26)
       AND   hl.DATE_N BETWEEN @DT1 AND @DT2;
 
+    -- تبدیل کالا (TAG 30): یک سطر، دو سر — عیناً مثل dbo.MOGHA_ANBAR.
+    -- خروج مبدأ از (CODE، ANBAR، MEGHk)؛ ورود مقصد از (N_RASID، ANBARF،
+    -- MEGH_MAR) که اینجا «مرجوعی» نیست، مقدار ورود است. سمت ورود TAG=31
+    -- می‌گیرد تا tartib «تبدیل - ورود» را بگیرد — همان ترفند TAG=6 بالا.
+    INSERT #PM
+    SELECT  il.ANBAR, TRY_CAST(il.CODE AS BIGINT), hl.DATE_N, hl.NUMBER, il.TAG, -il.MEGHk
+    FROM    dbo.INVO_LST il
+    JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
+    WHERE   il.TAG = 30
+      AND   hl.DATE_N BETWEEN @DT1 AND @DT2;
+
+    INSERT #PM
+    SELECT  CAST(il.ANBARF AS INT), TRY_CAST(il.N_RASID AS BIGINT), hl.DATE_N, hl.NUMBER,
+            CAST(31 AS FLOAT), il.MEGH_MAR
+    FROM    dbo.INVO_LST il
+    JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
+    WHERE   il.TAG = 30
+      AND   il.N_RASID IS NOT NULL AND il.ANBARF IS NOT NULL
+      AND   hl.DATE_N BETWEEN @DT1 AND @DT2;
+
     INSERT #PM
     SELECT  il.ANBAR, TRY_CAST(il.CODE AS BIGINT), hl.DATE_N, hl.NUMBER, il.TAG, -il.MEGHk
     FROM    dbo.INVO_LST il
@@ -2670,6 +2690,25 @@ BEGIN
               AND   il.ANBAR IN (SELECT Anbar FROM dbo.CC_AnbarHes)
 
             UNION ALL
+            -- تبدیل کالا (TAG 30) — خروج مبدأ
+            SELECT  il.ANBAR, TRY_CAST(il.CODE AS BIGINT), -il.MEGHk
+            FROM    dbo.INVO_LST il
+            JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
+            WHERE   il.TAG = 30
+              AND   hl.DATE_N <= @DT2
+              AND   il.ANBAR IN (SELECT Anbar FROM dbo.CC_AnbarHes)
+
+            UNION ALL
+            -- تبدیل کالا (TAG 30) — ورود مقصد (کالا N_RASID، مقدار MEGH_MAR)
+            SELECT  CAST(il.ANBARF AS INT), TRY_CAST(il.N_RASID AS BIGINT), il.MEGH_MAR
+            FROM    dbo.INVO_LST il
+            JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
+            WHERE   il.TAG = 30
+              AND   il.N_RASID IS NOT NULL AND il.ANBARF IS NOT NULL
+              AND   hl.DATE_N <= @DT2
+              AND   CAST(il.ANBARF AS INT) IN (SELECT Anbar FROM dbo.CC_AnbarHes)
+
+            UNION ALL
             SELECT  il.ANBAR, TRY_CAST(il.CODE AS BIGINT), -il.MEGHk
             FROM    dbo.INVO_LST il
             JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
@@ -2740,6 +2779,19 @@ BEGIN
             WHERE   hl.DATE_N <= @DT2
               AND   il.TAG = 5
               AND   il.ANBARF IS NOT NULL
+              AND   CAST(il.ANBARF AS INT) IN (SELECT Anbar FROM dbo.CC_AnbarHes)
+
+            UNION ALL
+            -- تبدیل کالا: نرخ مقصد در AVRAGE2؛ ترتیب از TAGCOD کد ۳۱
+            -- (تبدیل - ورود)، عیناً مثل dbo.MOGHA_ANBAR.lastav_base.
+            SELECT  CAST(il.ANBARF AS INT), TRY_CAST(il.N_RASID AS BIGINT), il.AVRAGE2,
+                    hl.DATE_N, t.tartib, t.BARGAH, il.NUMBER, il.ID
+            FROM    dbo.INVO_LST il
+            JOIN    dbo.HEAD_LST hl ON il.NUMBER = hl.NUMBER AND il.TAG = hl.TAG
+            JOIN    dbo.TAGCOD t ON t.CODE = 31
+            WHERE   hl.DATE_N <= @DT2
+              AND   il.TAG = 30
+              AND   il.N_RASID IS NOT NULL AND il.ANBARF IS NOT NULL
               AND   CAST(il.ANBARF AS INT) IN (SELECT Anbar FROM dbo.CC_AnbarHes)
         ),
         -- وقتی یک سند، یک کالا را در چند ردیف با نرخ‌های متفاوت ثبت کرده

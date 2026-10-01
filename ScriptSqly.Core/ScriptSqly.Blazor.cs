@@ -59,25 +59,27 @@ GO
 /* ── ۲) کلید فعال‌سازی، هم‌خانواده‌ی ACL_ENFORCE حقوق و دستمزد ─────────
    اگر PAY2_CONFIG نباشد، بلوک رد می‌شود و سرور کلید را «خاموش» می‌خواند. */
 IF OBJECT_ID(N'dbo.PAY2_CONFIG', N'U') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY = N'CRM_ACL_ENFORCE')
 BEGIN
-    INSERT INTO dbo.PAY2_CONFIG
-        (CFG_KEY, CFG_VALUE, CFG_OPTIONS, CFG_DEFAULT, CFG_SECTION,
-         LABEL_FA, DESC_FA, OPT_LABELS, DATA_TYPE, ACCESS_LEVEL, CRT)
-    VALUES
-        (N'CRM_ACL_ENFORCE',
-         N'0',
-         N'1|0',
-         N'0',
-         N'امنیت',
-         N'محدودکردن CRM به داده‌های خودِ کاربر',
-         N'۰ = خاموش (پیش‌فرض): هر کاربر CRM همه را می‌بیند، مثل قبل. ' +
-         N'۱ = روشن: هر کاربر فقط شرکت‌ها، پیگیری‌ها و یادداشت‌های خودش را ' +
-         N'می‌بیند، مگر مجوز فرم CRMALL («مشاهده CRM همه کاربران») را داشته باشد.',
-         N'روشن — هر کاربر فقط داده‌ی خودش|خاموش — همه همه‌چیز را می‌بینند',
-         N'BOOL',
-         1,
-         GETDATE());
+    IF NOT EXISTS (SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY = N'CRM_ACL_ENFORCE')
+    BEGIN
+        INSERT INTO dbo.PAY2_CONFIG
+            (CFG_KEY, CFG_VALUE, CFG_OPTIONS, CFG_DEFAULT, CFG_SECTION,
+             LABEL_FA, DESC_FA, OPT_LABELS, DATA_TYPE, ACCESS_LEVEL, CRT)
+        VALUES
+            (N'CRM_ACL_ENFORCE',
+             N'0',
+             N'1|0',
+             N'0',
+             N'امنیت',
+             N'محدودکردن CRM به داده‌های خودِ کاربر',
+             N'۰ = خاموش (پیش‌فرض): هر کاربر CRM همه را می‌بیند، مثل قبل. ' +
+             N'۱ = روشن: هر کاربر فقط شرکت‌ها، پیگیری‌ها و یادداشت‌های خودش را ' +
+             N'می‌بیند، مگر مجوز فرم CRMALL («مشاهده CRM همه کاربران») را داشته باشد.',
+             N'روشن — هر کاربر فقط داده‌ی خودش|خاموش — همه همه‌چیز را می‌بینند',
+             N'BOOL',
+             1,
+             GETDATE());
+    END
 END
 GO
 

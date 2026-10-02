@@ -165,7 +165,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 IF @PREVIEW_ONLY=1
 BEGIN
-    SELECT N'تکمیل حساب‌های خرید، بهای تمام‌شده و سایر حساب‌های خودگردان جاافتاده؛ استفاده از حساب معادل موجود و بررسی همه ارجاع‌های تنظیمات. کدهای معتبر و اسناد قبلی حفظ می‌شوند.' AS Preview;
+    SELECT N'تکمیل حساب‌های خودگردان و فعال‌سازی صدور آرتیکل اسناد صنعتی؛ کدهای معتبر و اسناد قبلی حفظ می‌شوند.' AS Preview;
     RETURN;
 END;
 BEGIN TRY
@@ -321,6 +321,10 @@ BEGIN TRY
         AND NOT (J.FieldName IN(N'PERSONEL',N'PERVAM') AND
             EXISTS(SELECT 1 FROM dbo.TOTA_HES T WHERE CONVERT(nvarchar(40),CONVERT(bigint,T.NUMBER))=LTRIM(RTRIM(J.Code))));
     IF @Message IS NOT NULL THROW 51028,@Message,1;
+    -- WIN_SAZMAN / legacy SAZMAN: SANAT is the industrial-article checkbox.
+    -- Keep this outside the one-time invoice conversion guard, so a converted
+    -- database can also apply the required setting on a subsequent run.
+    UPDATE dbo.SAZMAN SET SANAT=1 WHERE SANAT IS NULL OR SANAT=0;
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH

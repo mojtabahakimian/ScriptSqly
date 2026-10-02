@@ -56,6 +56,13 @@ namespace ScriptSqly.Migrations
                 {
                     CostCloseScript(db);
                 }
+
+                #region DENAFARAZ MIGRATION
+                if (_type_ == 10) // تبدیل دنافراز به مسترکارکت
+                {
+                    DenaFarazMigration(db);
+                }
+                #endregion
                 //try { db.Execute($@""); } catch { }
 
                 var SanadCount = db.Query<double?>("SELECT COUNT(*) FROM dbo.DEED_HED").FirstOrDefault();
@@ -185,6 +192,25 @@ ALTER TABLE [dbo].[DEFAULTDEP] ADD  DEFAULT (getdate()) FOR [CRT]
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.TCOD_MAP_GRP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.AZAE ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
+
+                    try { ExecuteMigration(db, $@"
+INSERT INTO GSCALE ([GSCACOD], [GSCANAME], [GSCAKIND])
+SELECT seed.[GSCACOD], seed.[GSCANAME], seed.[GSCAKIND] FROM (VALUES
+(1, N'پارامتر کيفي  ليکرت', 1),
+(2, N'تحصيلات', 1),
+(3, N'سن', 0),
+(4, N'سابقه پروانه کسب', 0),
+(5, N'سابقه فعاليت در آباديس', 1),
+(6, N'تاهل-تجرد', 1),
+(7, N'بله /خير', 0),
+(8, N'ميانگين خريد ماهيانه  در 6 ماه گذشته', 0),
+(9, N'سابقه کارشناس فروش در شرکت', 0),
+(10, N'ميانگين فروش 6 ماهه کارشناس', 0),
+(11, N'انظبات مالي', 0),
+(12, N'پارامتر کيفي  ليکرت کارشناسان فروش', 0)
+) AS seed ([GSCACOD], [GSCANAME], [GSCAKIND])
+WHERE NOT EXISTS (SELECT 1 FROM GSCALE AS target WHERE target.[GSCACOD]=seed.[GSCACOD]);
+"); } catch { }
 
                     try { ExecuteMigration(db, $@"
 INSERT INTO GSCADTL ([GSCADTCOD], [GSCANAME], [GSCAGRADE], [GSCAFROM], [GSCATO], [GSCACOD])

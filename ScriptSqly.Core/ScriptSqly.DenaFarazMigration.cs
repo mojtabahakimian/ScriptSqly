@@ -1,0 +1,769 @@
+using Microsoft.Data.SqlClient;
+
+namespace ScriptSqly.Migrations
+{
+    public static partial class ScriptSqly
+    {
+        public const string DenaFarazMigrationSql = @"
+-- ====================================================================================
+-- DenaFaraz -> MrCorrect Migration Script (Engine Version 3)
+-- Fully transactional, preflight-checked, idempotent, and non-destructive.
+-- ====================================================================================
+
+-- ------------------------------------------------------------------------------------
+-- STEP 1: Pre-requisite Columns & Safe Trigger Handling
+-- ------------------------------------------------------------------------------------
+DECLARE @trg_state INT = (
+    SELECT CASE WHEN is_disabled = 0 THEN 1 ELSE 0 END
+    FROM sys.triggers
+    WHERE name = 'trg_SALA_DTL_Audit_Secure' AND parent_id = OBJECT_ID('dbo.SALA_DTL')
+);
+
+IF @trg_state = 1
+BEGIN
+    DISABLE TRIGGER dbo.trg_SALA_DTL_Audit_Secure ON dbo.SALA_DTL;
+END;
+
+-- Ensure PAY2 tables have CRT and UID if they exist
+DECLARE @pay2Tbl NVARCHAR(128);
+DECLARE pay2Cur CURSOR LOCAL FAST_FORWARD FOR
+    SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME LIKE 'PAY2_%' AND TABLE_TYPE='BASE TABLE';
+OPEN pay2Cur;
+FETCH NEXT FROM pay2Cur INTO @pay2Tbl;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF COL_LENGTH('dbo.' + @pay2Tbl, 'CRT') IS NULL
+        EXEC('ALTER TABLE dbo.' + @pay2Tbl + ' ADD CRT DATETIME NULL DEFAULT (getdate());');
+    IF COL_LENGTH('dbo.' + @pay2Tbl, 'UID') IS NULL
+        EXEC('ALTER TABLE dbo.' + @pay2Tbl + ' ADD UID INT NULL;');
+    FETCH NEXT FROM pay2Cur INTO @pay2Tbl;
+END;
+CLOSE pay2Cur;
+DEALLOCATE pay2Cur;
+
+IF OBJECT_ID('dbo.PAY2_EMPLOYEE', 'U') IS NOT NULL AND COL_LENGTH('dbo.PAY2_EMPLOYEE', 'USERCO') IS NULL
+    ALTER TABLE dbo.PAY2_EMPLOYEE ADD USERCO INT NULL;
+
+-- Columns on core tables
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='HEAD_LST' AND COLUMN_NAME='ARZCODING')
+    ALTER TABLE dbo.HEAD_LST ADD ARZCODING NVARCHAR(100) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='HEAD_LST' AND COLUMN_NAME='ARZKIND2')
+    ALTER TABLE dbo.HEAD_LST ADD ARZKIND2 BIGINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='DEED_DTL' AND COLUMN_NAME='ARZKIND2')
+    ALTER TABLE dbo.DEED_DTL ADD ARZKIND2 BIGINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='PGET_LST' AND COLUMN_NAME='ARZKIND2')
+    ALTER TABLE dbo.PGET_LST ADD ARZKIND2 BIGINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='PGET_LST' AND COLUMN_NAME='MHAZ_NO')
+    ALTER TABLE dbo.PGET_LST ADD MHAZ_NO INT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TAGCOD' AND COLUMN_NAME='tartib')
+    ALTER TABLE dbo.TAGCOD ADD tartib INT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SAZMAN' AND COLUMN_NAME='SMSTYPE')
+    ALTER TABLE dbo.SAZMAN ADD SMSTYPE NVARCHAR(255) NULL CONSTRAINT DF_SAZMAN_SMSTYPE DEFAULT ('TSMS');
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SAZMAN' AND COLUMN_NAME='HTAHOL')
+    ALTER TABLE dbo.SAZMAN ADD HTAHOL BIT NULL CONSTRAINT DF_SAZMAN_HTAHOL DEFAULT (1);
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SAZMAN' AND COLUMN_NAME='MOADINA_SCNUM')
+    ALTER TABLE dbo.SAZMAN ADD MOADINA_SCNUM DECIMAL(18,0) NULL CONSTRAINT DF_SAZMAN_MOADINA DEFAULT (1);
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='DEPART' AND COLUMN_NAME='PCODE')
+    ALTER TABLE dbo.DEPART ADD PCODE NVARCHAR(10) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='DEPART' AND COLUMN_NAME='BBC')
+    ALTER TABLE dbo.DEPART ADD BBC NVARCHAR(50) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SALA_DTL' AND COLUMN_NAME='DEFAULT_NAHVA')
+    ALTER TABLE dbo.SALA_DTL ADD DEFAULT_NAHVA BIGINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SALA_DTL' AND COLUMN_NAME='erjabe')
+    ALTER TABLE dbo.SALA_DTL ADD erjabe INT NULL CONSTRAINT DF_SALA_DTL_erjabe DEFAULT (1);
+
+EXEC('UPDATE dbo.SALA_DTL SET erjabe = 1 WHERE erjabe IS NULL;');
+
+-- Re-enable trigger if external audit DB exists
+IF @trg_state = 1 AND DB_ID('DenaAuditDb') IS NOT NULL
+BEGIN
+    ENABLE TRIGGER dbo.trg_SALA_DTL_Audit_Secure ON dbo.SALA_DTL;
+END;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 2: Seed GSCALE Table
+-- ------------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.GSCALE', 'U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.GSCALE (GSCACOD, GSCANAME, GSCAKIND)
+    SELECT seed.[GSCACOD], seed.[GSCANAME], seed.[GSCAKIND] FROM (VALUES
+    (1, N'پارامتر کيفي  ليکرت', 1),
+    (2, N'تحصيلات', 1),
+    (3, N'سن', 0),
+    (4, N'سابقه پروانه کسب', 0),
+    (5, N'سابقه فعاليت در آباديس', 1),
+    (6, N'تاهل-تجرد', 1),
+    (7, N'بله /خير', 0),
+    (8, N'ميانگين خريد ماهيانه  در 6 ماه گذشته', 0),
+    (9, N'سابقه کارشناس فروش در شرکت', 0),
+    (10, N'ميانگين فروش 6 ماهه کارشناس', 0),
+    (11, N'انظبات مالي', 0),
+    (12, N'پارامتر کيفي  ليکرت کارشناسان فروش', 0)
+    ) AS seed ([GSCACOD], [GSCANAME], [GSCAKIND])
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.GSCALE AS target WHERE target.[GSCACOD]=seed.[GSCACOD]);
+END;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 3: Identity Columns
+-- ------------------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TOTA_HES' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TOTA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='DETA_HES' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.DETA_HES ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='PAY_GETD' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.PAY_GETD ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='PAY_GETP' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.PAY_GETP ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='VISITOR_DTL' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.VISITOR_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='VISITORS_PORSANT_KALA' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.VISITORS_PORSANT_KALA ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='BLOCK_CUSTOMER' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.BLOCK_CUSTOMER ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TCOD_ARZ' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TCOD_ARZ ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='DTL_MANF' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.DTL_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='HEAD_MANF' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.HEAD_MANF ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TCODE_MENUITEM' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TCODE_MENUITEM ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TCOD_MARKAZHAZ' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TCOD_MARKAZHAZ ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='MODULE_D' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.MODULE_D ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TCOD_MAP' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TCOD_MAP ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TAKHPERS' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TAKHPERS ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='CUSTKIND_TF' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.CUSTKIND_TF ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TCOD_MAP_GRP' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TCOD_MAP_GRP ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='TAKHFIF_DEF_DTL' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.TAKHFIF_DEF_DTL ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='AZAE' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.AZAE ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SMS_FORMATS' AND COLUMN_NAME='ID')
+    ALTER TABLE dbo.SMS_FORMATS ADD ID BIGINT IDENTITY(1,1) NOT NULL;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 4: Missing Tables
+-- ------------------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='RewardRules')
+BEGIN
+    CREATE TABLE dbo.RewardRules (
+        RuleID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ProductID_Target NVARCHAR(15) NOT NULL,
+        Quantity_Threshold INT NOT NULL,
+        Reward_Type NVARCHAR(50) NOT NULL DEFAULT (N'محصول'),
+        Reward_ProductID NVARCHAR(15) NOT NULL,
+        Reward_Quantity INT NULL,
+        Reward_Discount_Percentage DECIMAL(5,2) NULL,
+        IsActive BIT NOT NULL DEFAULT (1),
+        StartDate BIGINT NULL,
+        EndDate BIGINT NULL,
+        Description NVARCHAR(200) NULL,
+        CRT DATETIME NULL DEFAULT (getdate()),
+        UID INT NULL
+    );
+END;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='GENERAL_OPTIONS')
+BEGIN
+    CREATE TABLE dbo.GENERAL_OPTIONS (
+        OptionName NVARCHAR(100) NOT NULL PRIMARY KEY,
+        OptionValue NVARCHAR(500) NULL,
+        Description NVARCHAR(1000) NULL,
+        LastUpdated DATETIME NULL DEFAULT (getdate()),
+        CRT DATETIME NULL DEFAULT (getdate()),
+        UID INT NULL
+    );
+END;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='INVO_LST_EXTENDED')
+BEGIN
+    CREATE TABLE dbo.INVO_LST_EXTENDED (
+        mu NVARCHAR(8) NOT NULL,
+        nw DECIMAL(18, 4) NULL,
+        cfee DECIMAL(18, 4) NULL,
+        cut NVARCHAR(3) NULL,
+        exr DECIMAL(18, 4) NULL,
+        ssrv DECIMAL(18, 4) NULL,
+        sscv DECIMAL(18, 4) NULL,
+        vra DECIMAL(18, 2) NOT NULL DEFAULT (9),
+        odt NVARCHAR(255) NULL,
+        odr DECIMAL(18, 2) NULL,
+        odam DECIMAL(18, 2) NULL,
+        olt NVARCHAR(255) NULL,
+        olr DECIMAL(18, 2) NULL,
+        olam DECIMAL(18, 2) NULL,
+        consfee DECIMAL(18, 4) NULL,
+        spro DECIMAL(18, 4) NULL,
+        bros DECIMAL(18, 4) NULL,
+        tcpbs DECIMAL(18, 4) NULL,
+        cop DECIMAL(18, 4) NULL,
+        vop DECIMAL(18, 4) NULL,
+        bsrn NVARCHAR(12) NULL,
+        CRT DATETIME NULL DEFAULT (getdate()),
+        UID INT NULL
+    );
+END;
+GO
+
+-- TAGCOD tartib
+UPDATE dbo.TAGCOD SET tartib = CASE CODE
+    WHEN 0 THEN 1  WHEN 1 THEN 4  WHEN 2 THEN 18 WHEN 3 THEN 15 WHEN 4 THEN 6
+    WHEN 5 THEN 14 WHEN 6 THEN 10 WHEN 7 THEN 3  WHEN 8 THEN 17 WHEN 9 THEN 9
+    WHEN 10 THEN 19 WHEN 11 THEN 20 WHEN 12 THEN 2 WHEN 13 THEN 23 WHEN 14 THEN 21
+    WHEN 15 THEN 22 WHEN 17 THEN 5 WHEN 18 THEN 13 WHEN 20 THEN 16 WHEN 22 THEN 7
+    WHEN 24 THEN 8 WHEN 26 THEN 11 WHEN 27 THEN 12 WHEN 30 THEN 14 WHEN 31 THEN 10
+    ELSE tartib
+END;
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TAGCOD WHERE CODE = 25)
+    INSERT INTO dbo.TAGCOD (CODE, BARGAH, tartib) VALUES (25, N'فاکتور برگشت فروش', 8);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TAGCOD WHERE CODE = 30)
+    INSERT INTO dbo.TAGCOD (CODE, BARGAH, tartib) VALUES (30, N'تبديل - خروج', 14);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TAGCOD WHERE CODE = 31)
+    INSERT INTO dbo.TAGCOD (CODE, BARGAH, tartib) VALUES (31, N'تبديل - ورود', 10);
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 5: TFORMS and Restricted Admin Permissions
+-- ------------------------------------------------------------------------------------
+IF OBJECT_ID('tempdb..#MissingForms') IS NOT NULL DROP TABLE #MissingForms;
+CREATE TABLE #MissingForms (IDH INT, FORMNAME NVARCHAR(50), CAPTION NVARCHAR(100), kind SMALLINT, GRP SMALLINT, UID INT);
+
+INSERT INTO #MissingForms (IDH, FORMNAME, CAPTION, kind, GRP, UID) VALUES
+(399, N'JAYGOZIN', N'جايگزيني يک حساب در اسناد با يک حساب ديگر', 3, 2, NULL),
+(400, N'BGU', N' تعريف بودجه', 3, 1, NULL),
+(401, N'moreinfo', N' اطلاعات بيشتر', 3, 1, NULL),
+(402, N'NOTE', N'ياد داشت ', 3, 16, NULL),
+(403, N'ESASSET', N'کليد اصلاح تعريف تجهيزات PM', 3, 12, NULL),
+(405, N'PMASSETS', N'تعريف تجهيزات تعمير نگهداري CMMS', 3, 12, NULL),
+(406, N'MDKAR', N'مديريت دستور کارها CMMS', 3, 12, NULL),
+(407, N'PMLOCATION', N'تعريف محل استفاده دستگاه ها CMMS', 3, 12, NULL),
+(408, N'PMPMEM', N'اعلام خرابي CMMS', 3, 12, NULL),
+(409, N'PMKIND', N'تعريف نوع تعمير و نگهداري (Work) CMMS', 3, 12, NULL),
+(410, N'PMCALEN', N'تقويم دستور کارها CMMS', 3, 12, NULL),
+(411, N'PMDARKH', N'درخواست کالا از انبار CMMS', 3, 12, NULL),
+(412, N'PMWORKOR', N'ليست دستور کارها CMMS', 3, 12, NULL),
+(413, N'PMFAILDEF', N'تعريف نوع خرابي CMMS', 3, 12, NULL),
+(416, N'CUSANAD', N'سند', 3, 3, 78),
+(417, N'elamghe', N'اعلاميه قيمت را بتواند اصلاح کند', 3, 3, 114),
+(418, N'PAY2_DASHBOARD', N'داشبورد حقوق و دستمزد', 3, 9, NULL),
+(419, N'PAY2_WORKSHOP', N'کارگاه‌ها و سرفصل‌های حسابداری', 3, 9, NULL),
+(420, N'PAY2_EMPLOYEE', N'پرسنل، قرارداد و مرخصی', 3, 9, NULL),
+(421, N'PAY2_DECREE', N'احکام کارگزینی', 3, 9, NULL),
+(422, N'PAY2_ATTENDANCE', N'کارکرد ماهیانه', 3, 9, NULL),
+(423, N'PAY2_ADVANCE', N'مساعده', 3, 9, NULL),
+(424, N'PAY2_LOAN', N'وام پرسنل', 3, 9, NULL),
+(425, N'PAY2_CALC', N'محاسبه حقوق ماهیانه', 3, 9, NULL),
+(426, N'PAY2_SETTLEMENT', N'تسویه حساب پرسنل', 3, 9, NULL),
+(427, N'PAY2_CONFIG', N'تعریف آیتم‌های حکم و قالب‌ها', 3, 9, NULL),
+(428, N'PAY2_SETTINGS', N'تنظیمات حقوق و دستمزد', 3, 9, NULL),
+(429, N'PAY2_REPORTS', N'گزارش‌های حقوق و دستمزد', 3, 9, NULL),
+(430, N'PAY2_ACT_RUN_CALC', N'اجرای محاسبه حقوق', 3, 9, NULL),
+(431, N'PAY2_ACT_FINALIZE_RUN', N'نهایی‌کردن محاسبه حقوق', 3, 9, NULL),
+(432, N'PAY2_ACT_REVERT_RUN', N'برگشت محاسبه حقوق', 3, 9, NULL),
+(433, N'PAY2_ACT_GEN_DEED', N'صدور سند حسابداری حقوق', 3, 9, NULL),
+(434, N'PAY2_ACT_REVERT_DEED', N'ابطال سند حسابداری حقوق', 3, 9, NULL),
+(435, N'PAY2_ACT_CLOSE_PERIOD', N'بستن دوره کارکرد', 3, 9, NULL),
+(436, N'PAY2_ACT_REOPEN_PERIOD', N'بازگشایی/حذف دوره کارکرد', 3, 9, NULL),
+(437, N'PAY2_ACT_APPROVE_DECREE', N'تأیید نهایی حکم کارگزینی', 3, 9, NULL),
+(438, N'PAY2_ACT_FINALIZE_SETTLE', N'نهایی‌کردن و برگشت تسویه حساب', 3, 9, NULL),
+(439, N'PAY2_ACT_VIEW_OTHERS', N'مشاهده مبالغ حقوق سایر پرسنل', 3, 9, NULL),
+(440, N'PAY2_ACT_EDIT_SENSITIVE_CONF', N'تغییر تنظیمات حساس (نرخ بیمه/مالیات/سقف)', 3, 9, NULL),
+(441, N'PAY2_ACT_MANUAL_ADVANCE_EXCL', N'ثبت استثنای دستی مساعده', 3, 9, NULL),
+(442, N'PAY2_ACT_EDIT_EMP_FLAGS', N'تغییر مشمولیت بیمه/مالیات پرسنل', 3, 9, NULL),
+(443, N'PAY2_ACT_EXPORT_DISKS', N'خروجی اکسل/PDF و دیسکت بیمه و مالیات', 3, 9, NULL),
+(444, N'PAY2_ACT_MANAGE_PERMISSIONS', N'مدیریت دسترسی‌های حقوق و دستمزد', 3, 9, NULL),
+(445, N'PAY2_MY_PAYSLIP', N'فیش حقوقی من', 3, 9, NULL),
+(446, N'CC_DASHBOARD', N'داشبورد بستن ماه بهای تمام‌شده', 3, 10, NULL),
+(447, N'CC_PROGRESS', N'پیشرفت اجرای بستن ماه', 3, 10, NULL),
+(448, N'CC_EXCEPTIONS', N'مغایرت‌های بستن ماه', 3, 10, NULL),
+(449, N'CC_DECISIONS', N'تصمیم انحراف', 3, 10, NULL),
+(450, N'CC_CONVERSION_COST', N'هزینه تبدیل', 3, 10, NULL),
+(451, N'CC_MARGINS', N'سود و زیان کالا', 3, 10, NULL),
+(452, N'CC_RUN_HISTORY', N'سوابق اجراها', 3, 10, NULL),
+(453, N'CC_CONFIG', N'تنظیمات بستن ماه', 3, 10, NULL),
+(454, N'CC_ACT_START', N'شروع اجرای بستن ماه', 3, 10, NULL),
+(455, N'CC_ACT_AUTO_FIX', N'اصلاح خودکار داده', 3, 10, NULL),
+(456, N'CC_ACT_CLOSE_EXCEPTION', N'بستن استثنا', 3, 10, NULL),
+(457, N'CC_ACT_DECIDE_VARIANCE', N'ثبت تصمیم انحراف', 3, 10, NULL),
+(458, N'CC_ACT_APPLY_MARGIN_TARGETS', N'اعمال ضریب تعدیل', 3, 10, NULL),
+(459, N'CC_ACT_PROPAGATE_RATES', N'اجرای موتور نرخ', 3, 10, NULL),
+(460, N'CC_ACT_ROLLBACK', N'بازگردانی از اسنپ‌شات', 3, 10, NULL),
+(461, N'CC_ACT_APPROVE', N'تأیید نهایی و قفل ماه', 3, 10, NULL),
+(462, N'CC_ACT_EXPORT', N'خروجی اکسل', 3, 10, NULL),
+(463, N'CC_ACT_REBUILD_ISSUE', N'بازسازی سند حواله خروج مواد', 3, 10, NULL),
+(464, N'CC_ACT_REBALANCE_SUGGEST', N'سند اصلاحی مغایرت کارت انبار/حسابداری', 3, 10, NULL),
+(465, N'allcrm', N'مشاهده CRM همه کاربران', 3, 7, NULL),
+(466, N'sallpish', N'پیش فاکتور سایر کاربران را بتواند ببیند', 3, 3, NULL),
+(467, N'sallbfr', N'فاکتور برگشت فروش سایر کاربران را بتواند ببیند', 3, 3, NULL),
+(468, N'sallkhm', N'فاکتور خرید مستقیم سایر کاربران را بتواند ببیند', 3, 3, NULL),
+(469, N'sallbkh', N'فاکتور برگشت خرید سایر کاربران را بتواند ببیند', 3, 3, NULL),
+(470, N'sallranb', N'برگه رسید انبار سایر کاربران را بتواند ببیند', 3, 4, NULL),
+(471, N'sallhanb', N'برگه حواله انبار سایر کاربران را بتواند ببیند', 3, 4, NULL),
+(472, N'sallvkala', N'برگه ورود کالای ساخته شده دیگران را ببیند', 3, 6, NULL),
+(473, N'sallxmavad', N'برگه خروج مواد اولیه دیگران را ببیند', 3, 6, NULL),
+(474, N'sallf12', N'گردش کالا و اسناد سایر کاربران را در F12 ببیند', 3, 4, NULL),
+(475, N'sallsnad', N'اسناد حسابداری ثبت شده توسط دیگران را ببیند', 3, 2, NULL),
+(476, N'maprep', N'گزارش فروش روی نقشه ایران', 3, 3, NULL),
+(477, N'CC_ACT_ACCEPT_EXCEPTION', N'پذیرش دائمی مغایرت', 3, 10, NULL),
+(478, N'CC_ACT_FIX_SANAD_DATE', N'اصلاح تاریخ مغایرِ سند', 3, 10, NULL),
+(479, N'USER_AUDIT', N'سوابق و ردیابی فعالیت کاربران', 3, 1, NULL),
+(480, N'K2K', N'تبدیل کالا به کالا', 3, 4, NULL),
+(481, N'edvispors', N'تغییر پورسانت فاکتور فروش امضاشده', 3, 3, NULL);
+
+INSERT INTO dbo.TFORMS (IDH, FORMNAME, CAPTION, kind, GRP, UID)
+SELECT M.IDH, M.FORMNAME, M.CAPTION, M.kind, M.GRP, M.UID
+FROM #MissingForms M
+WHERE NOT EXISTS (SELECT 1 FROM dbo.TFORMS WHERE IDH = M.IDH);
+
+DROP TABLE #MissingForms;
+
+-- Clean up any overly broad permissions on sensitive groups (9=Payroll, 10=Cost Closing)
+-- Sensitive objects must ONLY belong to admin user (IDD = 1 or GRSAL = 9)
+DELETE C
+FROM dbo.SAL_CHEK C
+INNER JOIN dbo.TFORMS F ON C.OBJECT = F.IDH
+LEFT JOIN dbo.SALA_DTL S ON C.USERCO = S.IDD
+WHERE F.IDH >= 418 AND F.GRP IN (9, 10)
+  AND C.USERCO <> 1
+  AND ISNULL(S.GRSAL, 0) <> 9;
+
+-- Grant newly added objects ONLY to Admin (USERCO = 1)
+INSERT INTO dbo.SAL_CHEK (USERCO, OBJECT, RUN, SEE, INP, UPD, DEL, CRT, UID)
+SELECT 1, F.IDH, 1, 1, 1, 1, 1, GETDATE(), 1
+FROM dbo.TFORMS F
+WHERE F.IDH >= 399
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.SAL_CHEK C
+      WHERE C.USERCO = 1 AND C.OBJECT = F.IDH
+  );
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 6: Views (CREATE OR ALTER)
+-- ------------------------------------------------------------------------------------
+CREATE OR ALTER VIEW dbo.HAVALE AS SELECT HEAD_LST.* FROM dbo.HEAD_LST WHERE (TAG = 2);
+GO
+
+CREATE OR ALTER VIEW dbo.HAVALAH_FROOSH AS
+SELECT NUMBER1, TAG AS htag, TAG - 11 AS DTAG, ANBAR, NUMBER, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH, M_NAGHD, MABL_VAR, MOIN_VAR,
+       MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF, ANBARF, FNUMCO, DEPATMAN, SHIFT, CUST_KIND, USER_NAME, SGN1,
+       SGN2, SGN3, SGN4, MBAA, HMBAA, TAMIR, TICMBAA, TKHF, OKF, SADER, CDDATE, CDTIME, OKDATE, OKTIME, JAY, MODAT_PPID, PEPID, PEID,
+       SHARAYET, SGN1usid, sgn2usid, sgn3usid, UID
+FROM dbo.HEAD_LST
+WHERE (TAG = 13) AND (SADER = 0 OR SADER IS NULL);
+GO
+
+CREATE OR ALTER VIEW dbo.RASID_KHARID AS
+SELECT NUMBER, TAG AS htag, TAG - 11 AS Dtag, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH, M_NAGHD, MABL_VAR, MOIN_VAR,
+       MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF, ANBARF, FNUMCO, USER_NAME, TICMBAA, MBAA, HMBAA, DEPATMAN, SHIFT,
+       CUST_KIND, OKF, SADER, SHARAYET, SGN1, SGN2, SGN3, SGN4, TAMIR, TKHF, ARZD, ARZKIND, CDDATE, CDTIME, OKDATE, OKTIME, JAY,
+       sgn1usid, sgn2usid, sgn3usid, UID
+FROM dbo.HEAD_LST
+WHERE (TAG = 12) AND (SADER = 0 OR SADER IS NULL);
+GO
+
+CREATE OR ALTER VIEW dbo.HEAD_LST_FBK AS
+SELECT TOP (100) PERCENT NUMBER, TAG AS htag, TAG - 2 AS dtag, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH, M_NAGHD, MABL_VAR,
+       MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF, ANBARF, FNUMCO, USER_NAME, DEPATMAN, SHIFT, CUST_KIND, MBAA,
+       HMBAA, OKF, CDDATE, CDTIME, OKDATE, OKTIME, SHARAYET, SGN1, SGN2, SGN3, SGN4, TAMIR, TICMBAA, TKHF, SADER, ARZD, ARZKIND, JAY,
+       MODAT_PPID, PEPID, PEID, SGN1usid, sgn2usid, sgn3usid, UID
+FROM dbo.HEAD_LST
+WHERE (TAG = 4)
+ORDER BY NUMBER;
+GO
+
+CREATE OR ALTER VIEW dbo.HEAD_LST_KBK AS
+SELECT TOP (100) PERCENT NUMBER, TAG AS htag, TAG - 2 AS dtag, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH, M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF, ANBARF, FNUMCO, USER_NAME, DEPATMAN, SHIFT, CUST_KIND, MBAA, HMBAA, OKF, SGN1, SGN2, SGN3, SGN4, SGN1usid, sgn2usid, sgn3usid, UID
+FROM dbo.HEAD_LST
+WHERE (TAG = 3)
+ORDER BY NUMBER1;
+GO
+
+CREATE OR ALTER VIEW dbo.HEAD_LST_KBKazad AS
+SELECT TOP 100 PERCENT NUMBER, TAG AS htag, TAG - 1 AS dtag, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH, M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF, ANBARF, FNUMCO, USER_NAME, DEPATMAN, SHIFT, CUST_KIND, MBAA, HMBAA, OKF, SGN1, SGN2, SGN3, SGN4, SGN1usid, sgn2usid, sgn3usid, UID
+FROM dbo.HEAD_LST
+WHERE (TAG = 27)
+ORDER BY NUMBER1;
+GO
+
+CREATE OR ALTER VIEW dbo.HEAD_LST_BRFR AS
+SELECT TOP 100 PERCENT dbo.HEAD_LST.NUMBER1, dbo.HEAD_LST.NUMBER, dbo.HEAD_LST.DATE_N, dbo.INVO_LST.NUMBER AS INUMBER,
+       dbo.HEAD_LST.TAG - 1 AS HTAG, dbo.INVO_LST.ANBAR, dbo.INVO_LST.RADIF, dbo.INVO_LST.CODE, dbo.INVO_LST.MEGH, dbo.INVO_LST.MEGHk,
+       dbo.INVO_LST.MEGH_MAR, dbo.INVO_LST.MANDAH, dbo.INVO_LST.MABL, dbo.INVO_LST.MABL_K, dbo.INVO_LST.FROM_A, dbo.INVO_LST.N_RASID,
+       dbo.INVO_LST.MEGH_R, dbo.INVO_LST.RADAH, dbo.INVO_LST.SANAD_NO, dbo.INVO_LST.ANBARF, dbo.INVO_LST.VAHED_K, dbo.STUF_DEF.NAME,
+       dbo.TCOD_ANBAR.NAMES, dbo.TCOD_VAHEDS.NAMES AS VNAMES, dbo.HEAD_LST.TAH, dbo.HEAD_LST.MOLAH, dbo.CUSTKIND.CUSTKNAME,
+       dbo.DEPART.DEPNAME, dbo.SHIFT.SHNAME, dbo.CUST_HESAB.NAME AS HESAB, dbo.CUST_HESAB.ADDRESS, dbo.CUST_HESAB.TEL,
+       ISNULL(dbo.STUF_DEF.NAME, N' ') + N' ' + ISNULL(dbo.INVO_LST.MANDAH, N' ') AS KALA, dbo.HEAD_LST.CUST_NO, dbo.INVO_LST.N_KOL, dbo.INVO_LST.N_MOIN,
+       dbo.HEAD_LST.FNUMCO, dbo.CUST_HESAB.ECODE, dbo.CUST_HESAB.PCODE, dbo.CUST_HESAB.IYALAT, dbo.CUST_HESAB.MCODEM, dbo.CUST_HESAB.CITY,
+       dbo.INVO_LST.MABL_K - dbo.INVO_LST.N_MOIN AS mabkbt, dbo.INVO_LST.IMBAA,
+       dbo.INVO_LST.MABL_K - dbo.INVO_LST.N_MOIN + dbo.INVO_LST.IMBAA AS mabkn, dbo.CUST_HESAB.CODE_E, dbo.HEAD_LST.TAKHFIF, dbo.HEAD_LST.MBAA,
+       dbo.STUF_DEF.N_FANI, dbo.HEAD_LST.SADER, dbo.HEAD_LST.ANBARF AS ANBARFF
+FROM dbo.INVO_LST
+INNER JOIN dbo.TCOD_ANBAR ON dbo.INVO_LST.ANBAR = dbo.TCOD_ANBAR.CODE
+INNER JOIN dbo.HEAD_LST ON dbo.INVO_LST.NUMBER = dbo.HEAD_LST.NUMBER AND dbo.INVO_LST.TAG = dbo.HEAD_LST.TAG - 1
+LEFT OUTER JOIN dbo.CUST_HESAB ON dbo.HEAD_LST.CUST_NO = dbo.CUST_HESAB.hes
+LEFT OUTER JOIN dbo.SHIFT ON dbo.HEAD_LST.SHIFT = dbo.SHIFT.SHIFT_ID
+LEFT OUTER JOIN dbo.DEPART ON dbo.HEAD_LST.DEPATMAN = dbo.DEPART.DEPATMAN
+LEFT OUTER JOIN dbo.CUSTKIND ON dbo.HEAD_LST.CUST_KIND = dbo.CUSTKIND.CUST_COD
+LEFT OUTER JOIN dbo.TCOD_VAHEDS ON dbo.INVO_LST.VAHED_K = dbo.TCOD_VAHEDS.CODE
+LEFT OUTER JOIN dbo.STUF_DEF ON dbo.INVO_LST.CODE = dbo.STUF_DEF.CODE
+ORDER BY dbo.HEAD_LST.NUMBER1;
+GO
+
+CREATE OR ALTER VIEW dbo.CUST_HESAB AS
+SELECT RTRIM(CAST(N_KOL AS NVARCHAR))+'-'+RTRIM(CAST(NUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER AS NVARCHAR)) AS hes, NAME, ADDRESS, TEL, CODE_E, ECODE, PCODE, IYALAT, CITY, MCODEM, TOZIH, CUST_COD, MOBILE, Longitude, Latitude, ROUTE_NAME, OSTANID, SHAHRID, tob
+FROM dbo.TDETA_HES
+UNION
+SELECT RTRIM(CAST(N_KOL AS NVARCHAR))+'-'+RTRIM(CAST(NUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER2 AS NVARCHAR)) AS hes, NAME, ADDRESS, TEL, CODE_E, ECODE, PCODE, IYALAT, CITY, MCODEM, TOZIH, CUST_COD, MOBILE, Longitude, Latitude, ROUTE_NAME, OSTANID, SHAHRID, tob
+FROM dbo.TDETA_HES2
+UNION
+SELECT RTRIM(CAST(N_KOL AS NVARCHAR))+'-'+RTRIM(CAST(NUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER2 AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER3 AS NVARCHAR)) AS hes, NAME, ADDRESS, TEL, CODE_E, ECODE, PCODE, IYALAT, CITY, MCODEM, TOZIH, CUST_COD, MOBILE, Longitude, Latitude, ROUTE_NAME, OSTANID, SHAHRID, tob
+FROM dbo.TDETA_HES3
+UNION
+SELECT RTRIM(CAST(N_KOL AS NVARCHAR))+'-'+RTRIM(CAST(NUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER2 AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER3 AS NVARCHAR))+'-'+RTRIM(CAST(TNUMBER4 AS NVARCHAR)) AS hes, NAME, ADDRESS, TEL, CODE_E, ECODE, PCODE, IYALAT, CITY, MCODEM, TOZIH, CUST_COD, MOBILE, Longitude, Latitude, ROUTE_NAME, OSTANID, SHAHRID, tob
+FROM dbo.TDETA_HES4;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 7: ATOMIC MIGRATION TRANSACTION (Data + Vouchers + Settings + Log)
+-- ------------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.MIGRATION_DENAFARAZ_LOG', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.MIGRATION_DENAFARAZ_LOG (
+        ID INT IDENTITY(1,1) PRIMARY KEY,
+        MigratedAt DATETIME NOT NULL DEFAULT (GETDATE()),
+        SalesMigrated INT NOT NULL,
+        PurchasesMigrated INT NOT NULL,
+        ReturnsMigrated INT NOT NULL,
+        VouchersMigrated INT NOT NULL,
+        Status NVARCHAR(50) NOT NULL
+    );
+END;
+GO
+
+-- Guard: Execute only if not already completed
+IF NOT EXISTS (SELECT 1 FROM dbo.MIGRATION_DENAFARAZ_LOG WHERE Status = N'SUCCESS')
+BEGIN
+    -- Preflight Collision Check: ensure destination tags don't collide with non-matching numbers
+    DECLARE @collisionCount INT = 0;
+    SELECT @collisionCount = COUNT(*)
+    FROM dbo.HEAD_LST H_DEST
+    WHERE H_DEST.TAG IN (12, 13, 25, 27)
+      AND NOT EXISTS (
+          SELECT 1 FROM dbo.HEAD_LST H_SRC
+          WHERE H_SRC.NUMBER = H_DEST.NUMBER
+            AND (
+                (H_DEST.TAG = 13 AND H_SRC.TAG = 2) OR
+                (H_DEST.TAG = 12 AND H_SRC.TAG = 1) OR
+                (H_DEST.TAG = 25 AND H_SRC.TAG = 24) OR
+                (H_DEST.TAG = 27 AND H_SRC.TAG = 26)
+            )
+      );
+
+    IF @collisionCount > 0
+    BEGIN
+        THROW 51000, 'Preflight Error: Destination commercial tags (12, 13, 25, 27) contain rows that do not match source warehouse slips. Migration aborted to prevent collision.', 1;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @cntSale INT = 0, @cntPurch INT = 0, @cntRet INT = 0, @cntVouch INT = 0;
+
+        -- 7.1 SALES: Insert TAG 13 from TAG 2
+        INSERT INTO dbo.HEAD_LST (
+            NUMBER, TAG, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH,
+            M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF,
+            ANBARF, FNUMCO, DEPATMAN, SHIFT, CUST_KIND, USER_NAME, SHARAYET, SGN1, SGN2, SGN3, SGN4,
+            MBAA, HMBAA, TAMIR, TICMBAA, TKHF, OKF, SADER, ARZD, ARZKIND, CDDATE, CDTIME, OKDATE, OKTIME,
+            JAY, MODAT_PPID, PEPID, PEID, sgn1usid, sgn2usid, sgn3usid, CRT, UID, ARZKIND2, ARZCODING
+        )
+        SELECT
+            H2.NUMBER, 13, H2.ANBAR, ISNULL(NULLIF(H2.NUMBER1, 0), H2.NUMBER), H2.DATE_N, H2.TAH, H2.MAS, H2.VAS, H2.N_S, H2.CUST_NO, H2.MOLAH,
+            H2.M_NAGHD, H2.MABL_VAR, H2.MOIN_VAR, H2.MABL_HAV, H2.MOIN_HAV, H2.MABL_HAZ, H2.MOIN_HAZ, H2.TAKHFIF, H2.MOIN_KHF,
+            H2.ANBARF, H2.FNUMCO, H2.DEPATMAN, H2.SHIFT, H2.CUST_KIND, H2.USER_NAME, H2.SHARAYET, H2.SGN1, H2.SGN2, H2.SGN3, H2.SGN4,
+            H2.MBAA, H2.HMBAA, H2.TAMIR, H2.TICMBAA, H2.TKHF, H2.OKF, H2.SADER, H2.ARZD, H2.ARZKIND, H2.CDDATE, H2.CDTIME, H2.OKDATE, H2.OKTIME,
+            H2.JAY, H2.MODAT_PPID, H2.PEPID, H2.PEID, H2.sgn1usid, H2.sgn2usid, H2.sgn3usid, H2.CRT, H2.UID, H2.ARZKIND2, H2.ARZCODING
+        FROM dbo.HEAD_LST H2
+        WHERE H2.TAG = 2
+          AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST H13 WHERE H13.TAG = 13 AND H13.NUMBER = H2.NUMBER);
+
+        SET @cntSale = @@ROWCOUNT;
+
+        UPDATE dbo.HEAD_LST SET TAMIR = -1, OKF = 1 WHERE TAG = 2;
+
+        -- 7.2 PURCHASES: Insert TAG 12 from TAG 1
+        INSERT INTO dbo.HEAD_LST (
+            NUMBER, TAG, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH,
+            M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF,
+            ANBARF, FNUMCO, DEPATMAN, SHIFT, CUST_KIND, USER_NAME, SHARAYET, SGN1, SGN2, SGN3, SGN4,
+            MBAA, HMBAA, TAMIR, TICMBAA, TKHF, OKF, SADER, ARZD, ARZKIND, CDDATE, CDTIME, OKDATE, OKTIME,
+            JAY, MODAT_PPID, PEPID, PEID, sgn1usid, sgn2usid, sgn3usid, CRT, UID, ARZKIND2, ARZCODING
+        )
+        SELECT
+            H1.NUMBER, 12, H1.ANBAR, ISNULL(NULLIF(H1.NUMBER1, 0), H1.NUMBER), H1.DATE_N, H1.TAH, H1.MAS, H1.VAS, H1.N_S, H1.CUST_NO, H1.MOLAH,
+            H1.M_NAGHD, H1.MABL_VAR, H1.MOIN_VAR, H1.MABL_HAV, H1.MOIN_HAV, H1.MABL_HAZ, H1.MOIN_HAZ, H1.TAKHFIF, H1.MOIN_KHF,
+            H1.ANBARF, H1.FNUMCO, H1.DEPATMAN, H1.SHIFT, H1.CUST_KIND, H1.USER_NAME, H1.SHARAYET, H1.SGN1, H1.SGN2, H1.SGN3, H1.SGN4,
+            H1.MBAA, H1.HMBAA, H1.TAMIR, H1.TICMBAA, H1.TKHF, H1.OKF, H1.SADER, H1.ARZD, H1.ARZKIND, H1.CDDATE, H1.CDTIME, H1.OKDATE, H1.OKTIME,
+            H1.JAY, H1.MODAT_PPID, H1.PEPID, H1.PEID, H1.sgn1usid, H1.sgn2usid, H1.sgn3usid, H1.CRT, H1.UID, H1.ARZKIND2, H1.ARZCODING
+        FROM dbo.HEAD_LST H1
+        WHERE H1.TAG = 1
+          AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST H12 WHERE H12.TAG = 12 AND H12.NUMBER = H1.NUMBER);
+
+        SET @cntPurch = @@ROWCOUNT;
+
+        -- 7.3 SALES RETURNS: Insert TAG 25 from TAG 24
+        INSERT INTO dbo.HEAD_LST (
+            NUMBER, TAG, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH,
+            M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF,
+            ANBARF, FNUMCO, DEPATMAN, SHIFT, CUST_KIND, USER_NAME, SHARAYET, SGN1, SGN2, SGN3, SGN4,
+            MBAA, HMBAA, TAMIR, TICMBAA, TKHF, OKF, SADER, ARZD, ARZKIND, CDDATE, CDTIME, OKDATE, OKTIME,
+            JAY, MODAT_PPID, PEPID, PEID, sgn1usid, sgn2usid, sgn3usid, CRT, UID, ARZKIND2, ARZCODING
+        )
+        SELECT
+            H24.NUMBER, 25, H24.ANBAR, ISNULL(NULLIF(H24.NUMBER1, 0), H24.NUMBER), H24.DATE_N, H24.TAH, H24.MAS, H24.VAS, H24.N_S, H24.CUST_NO, H24.MOLAH,
+            H24.M_NAGHD, H24.MABL_VAR, H24.MOIN_VAR, H24.MABL_HAV, H24.MOIN_HAV, H24.MABL_HAZ, H24.MOIN_HAZ, H24.TAKHFIF, H24.MOIN_KHF,
+            H24.ANBARF, H24.FNUMCO, H24.DEPATMAN, H24.SHIFT, H24.CUST_KIND, H24.USER_NAME, H24.SHARAYET, H24.SGN1, H24.SGN2, H24.SGN3, H24.SGN4,
+            H24.MBAA, H24.HMBAA, H24.TAMIR, H24.TICMBAA, H24.TKHF, H24.OKF, H24.SADER, H24.ARZD, H24.ARZKIND, H24.CDDATE, H24.CDTIME, H24.OKDATE, H24.OKTIME,
+            H24.JAY, H24.MODAT_PPID, H24.PEPID, H24.PEID, H24.sgn1usid, H24.sgn2usid, H24.sgn3usid, H24.CRT, H24.UID, H24.ARZKIND2, H24.ARZCODING
+        FROM dbo.HEAD_LST H24
+        WHERE H24.TAG = 24
+          AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST H25 WHERE H25.TAG = 25 AND H25.NUMBER = H24.NUMBER);
+
+        SET @cntRet = @@ROWCOUNT;
+
+        -- 7.4 FREE PURCHASE RETURNS: Insert TAG 27 from TAG 26 (if any)
+        INSERT INTO dbo.HEAD_LST (
+            NUMBER, TAG, ANBAR, NUMBER1, DATE_N, TAH, MAS, VAS, N_S, CUST_NO, MOLAH,
+            M_NAGHD, MABL_VAR, MOIN_VAR, MABL_HAV, MOIN_HAV, MABL_HAZ, MOIN_HAZ, TAKHFIF, MOIN_KHF,
+            ANBARF, FNUMCO, DEPATMAN, SHIFT, CUST_KIND, USER_NAME, SHARAYET, SGN1, SGN2, SGN3, SGN4,
+            MBAA, HMBAA, TAMIR, TICMBAA, TKHF, OKF, SADER, ARZD, ARZKIND, CDDATE, CDTIME, OKDATE, OKTIME,
+            JAY, MODAT_PPID, PEPID, PEID, sgn1usid, sgn2usid, sgn3usid, CRT, UID, ARZKIND2, ARZCODING
+        )
+        SELECT
+            H26.NUMBER, 27, H26.ANBAR, ISNULL(NULLIF(H26.NUMBER1, 0), H26.NUMBER), H26.DATE_N, H26.TAH, H26.MAS, H26.VAS, H26.N_S, H26.CUST_NO, H26.MOLAH,
+            H26.M_NAGHD, H26.MABL_VAR, H26.MOIN_VAR, H26.MABL_HAV, H26.MOIN_HAV, H26.MABL_HAZ, H26.MOIN_HAZ, H26.TAKHFIF, H26.MOIN_KHF,
+            H26.ANBARF, H26.FNUMCO, H26.DEPATMAN, H26.SHIFT, H26.CUST_KIND, H26.USER_NAME, H26.SHARAYET, H26.SGN1, H26.SGN2, H26.SGN3, H26.SGN4,
+            H26.MBAA, H26.HMBAA, H26.TAMIR, H26.TICMBAA, H26.TKHF, H26.OKF, H26.SADER, H26.ARZD, H26.ARZKIND, H26.CDDATE, H26.CDTIME, H26.OKDATE, H26.OKTIME,
+            H26.JAY, H26.MODAT_PPID, H26.PEPID, H26.PEID, H26.sgn1usid, H26.sgn2usid, H26.sgn3usid, H26.CRT, H26.UID, H26.ARZKIND2, H26.ARZCODING
+        FROM dbo.HEAD_LST H26
+        WHERE H26.TAG = 26
+          AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST H27 WHERE H27.TAG = 27 AND H27.NUMBER = H26.NUMBER);
+
+        -- 7.5 Target-bounded update of DEED_DTL voucher lines
+        UPDATE D
+        SET D.TAG = 13
+        FROM dbo.DEED_DTL D
+        INNER JOIN dbo.HEAD_LST H ON D.NUMBER = H.NUMBER AND H.TAG = 13
+        WHERE D.TAG = 2;
+        SET @cntVouch = @cntVouch + @@ROWCOUNT;
+
+        UPDATE D
+        SET D.TAG = 12
+        FROM dbo.DEED_DTL D
+        INNER JOIN dbo.HEAD_LST H ON D.NUMBER = H.NUMBER AND H.TAG = 12
+        WHERE D.TAG = 1;
+        SET @cntVouch = @cntVouch + @@ROWCOUNT;
+
+        UPDATE D
+        SET D.TAG = 25
+        FROM dbo.DEED_DTL D
+        INNER JOIN dbo.HEAD_LST H ON D.NUMBER = H.NUMBER AND H.TAG = 25
+        WHERE D.TAG = 24;
+        SET @cntVouch = @cntVouch + @@ROWCOUNT;
+
+        UPDATE D
+        SET D.TAG = 27
+        FROM dbo.DEED_DTL D
+        INNER JOIN dbo.HEAD_LST H ON D.NUMBER = H.NUMBER AND H.TAG = 27
+        WHERE D.TAG = 26;
+        SET @cntVouch = @cntVouch + @@ROWCOUNT;
+
+        -- 7.6 Fix DEED_HED.NO_S for return vouchers (Fix Point 1 from Codex)
+        UPDATE H
+        SET H.NO_S = 4
+        FROM dbo.DEED_HED H
+        INNER JOIN dbo.HEAD_LST L ON H.N_S = L.N_S
+        WHERE L.TAG IN (24, 25) AND H.NO_S = 24;
+
+        -- 7.7 Dynamic Account Discovery for SAZMAN (Fix Point 3 from Codex)
+        DECLARE @cur_ada NVARCHAR(40), @cur_apa NVARCHAR(40), @cur_adv NVARCHAR(40);
+        SELECT @cur_ada = ADA, @cur_apa = APA, @cur_adv = ADV FROM dbo.SAZMAN;
+
+        IF CHARINDEX('-', ISNULL(@cur_ada, '')) = 0 AND ISNUMERIC(@cur_ada) = 1
+        BEGIN
+            DECLARE @found_ada NVARCHAR(40);
+            SELECT TOP 1 @found_ada = RTRIM(N_KOL) + '-' + RTRIM(NUMBER) + '-' + RTRIM(TNUMBER)
+            FROM dbo.TDETA_HES WHERE N_KOL = CAST(@cur_ada AS INT) ORDER BY NUMBER, TNUMBER;
+            IF @found_ada IS NOT NULL
+                UPDATE dbo.SAZMAN SET ADA = @found_ada;
+        END;
+
+        IF CHARINDEX('-', ISNULL(@cur_apa, '')) = 0 AND ISNUMERIC(@cur_apa) = 1
+        BEGIN
+            DECLARE @found_apa NVARCHAR(40);
+            SELECT TOP 1 @found_apa = RTRIM(N_KOL) + '-' + RTRIM(NUMBER) + '-' + RTRIM(TNUMBER)
+            FROM dbo.TDETA_HES WHERE N_KOL = CAST(@cur_apa AS INT) ORDER BY NUMBER, TNUMBER;
+            IF @found_apa IS NOT NULL
+                UPDATE dbo.SAZMAN SET APA = @found_apa;
+        END;
+
+        IF CHARINDEX('-', ISNULL(@cur_adv, '')) = 0 AND ISNUMERIC(@cur_adv) = 1
+        BEGIN
+            DECLARE @found_adv NVARCHAR(40);
+            SELECT TOP 1 @found_adv = RTRIM(N_KOL) + '-' + RTRIM(NUMBER) + '-' + RTRIM(TNUMBER)
+            FROM dbo.TDETA_HES WHERE N_KOL = CAST(@cur_adv AS INT) ORDER BY NUMBER, TNUMBER;
+            IF @found_adv IS NOT NULL
+                UPDATE dbo.SAZMAN SET ADV = @found_adv;
+        END;
+
+        UPDATE dbo.SAZMAN SET
+            SMSTYPE = ISNULL(SMSTYPE, 'TSMS'),
+            HTAHOL = ISNULL(HTAHOL, 1),
+            MOADINA_SCNUM = ISNULL(MOADINA_SCNUM, 1);
+
+        -- Direct sales option (character 18 = 5)
+        UPDATE dbo.SAZMAN
+        SET OPTIONSS =
+            CASE
+                WHEN LEN(ISNULL(OPTIONSS, '')) < 18
+                    THEN LEFT(ISNULL(OPTIONSS, '') + REPLICATE('0', 68), 17) + '5' + SUBSTRING(REPLICATE('0', 68), 19, 50)
+                ELSE
+                    STUFF(OPTIONSS, 18, 1, '5')
+            END;
+
+        -- 7.8 Record migration success INSIDE the transaction
+        INSERT INTO dbo.MIGRATION_DENAFARAZ_LOG (SalesMigrated, PurchasesMigrated, ReturnsMigrated, VouchersMigrated, Status)
+        VALUES (@cntSale, @cntPurch, @cntRet, @cntVouch, N'SUCCESS');
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 8: Backfill Historical Cheque Accounts (PAY_GETP & PAY_GETD)
+-- Strictly preserves existing values, populates empty HES1/HES2/HES3 from valid
+-- N_KOL/N_MOIN/N_TAF matching CUST_HESAB without guessing on incomplete records.
+-- ------------------------------------------------------------------------------------
+UPDATE P
+SET P.HES1 = RTRIM(P.N_KOL) + '-' + RTRIM(P.N_MOIN) + '-' + RTRIM(P.N_TAF)
+FROM dbo.PAY_GETP P
+WHERE (P.HES1 IS NULL OR RTRIM(P.HES1) = '')
+  AND P.N_KOL IS NOT NULL AND P.N_MOIN IS NOT NULL AND P.N_TAF IS NOT NULL AND P.N_KOL > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL) + '-' + RTRIM(P.N_MOIN) + '-' + RTRIM(P.N_TAF));
+
+UPDATE P
+SET P.HES2 = RTRIM(P.N_KOL2) + '-' + RTRIM(P.N_MOIN2) + '-' + RTRIM(P.N_TAF2)
+FROM dbo.PAY_GETP P
+WHERE (P.HES2 IS NULL OR RTRIM(P.HES2) = '')
+  AND P.N_KOL2 IS NOT NULL AND P.N_MOIN2 IS NOT NULL AND P.N_TAF2 IS NOT NULL AND P.N_KOL2 > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL2) + '-' + RTRIM(P.N_MOIN2) + '-' + RTRIM(P.N_TAF2));
+
+UPDATE P
+SET P.HES3 = RTRIM(P.N_KOL3) + '-' + RTRIM(P.N_MOIN3) + '-' + RTRIM(P.N_TAF3)
+FROM dbo.PAY_GETP P
+WHERE (P.HES3 IS NULL OR RTRIM(P.HES3) = '')
+  AND P.N_KOL3 IS NOT NULL AND P.N_MOIN3 IS NOT NULL AND P.N_TAF3 IS NOT NULL AND P.N_KOL3 > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL3) + '-' + RTRIM(P.N_MOIN3) + '-' + RTRIM(P.N_TAF3));
+
+UPDATE P
+SET P.HES1 = RTRIM(P.N_KOL) + '-' + RTRIM(P.N_MOIN) + '-' + RTRIM(P.N_TAF)
+FROM dbo.PAY_GETD P
+WHERE (P.HES1 IS NULL OR RTRIM(P.HES1) = '')
+  AND P.N_KOL IS NOT NULL AND P.N_MOIN IS NOT NULL AND P.N_TAF IS NOT NULL AND P.N_KOL > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL) + '-' + RTRIM(P.N_MOIN) + '-' + RTRIM(P.N_TAF));
+
+UPDATE P
+SET P.HES2 = RTRIM(P.N_KOL2) + '-' + RTRIM(P.N_MOIN2) + '-' + RTRIM(P.N_TAF2)
+FROM dbo.PAY_GETD P
+WHERE (P.HES2 IS NULL OR RTRIM(P.HES2) = '')
+  AND P.N_KOL2 IS NOT NULL AND P.N_MOIN2 IS NOT NULL AND P.N_TAF2 IS NOT NULL AND P.N_KOL2 > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL2) + '-' + RTRIM(P.N_MOIN2) + '-' + RTRIM(P.N_TAF2));
+
+UPDATE P
+SET P.HES3 = RTRIM(P.N_KOL3) + '-' + RTRIM(P.N_MOIN3) + '-' + RTRIM(P.N_TAF3)
+FROM dbo.PAY_GETD P
+WHERE (P.HES3 IS NULL OR RTRIM(P.HES3) = '')
+  AND P.N_KOL3 IS NOT NULL AND P.N_MOIN3 IS NOT NULL AND P.N_TAF3 IS NOT NULL AND P.N_KOL3 > 0
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.N_KOL3) + '-' + RTRIM(P.N_MOIN3) + '-' + RTRIM(P.N_TAF3));
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 9: Shipping / Transport Details (OTHER_DTL & OTHER_DTL_SUB for TAG 13)
+-- ------------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.OTHER_DTL', 'U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.OTHER_DTL (NUMBER, TAG, REQUEST_NO, BARNAMEH, DRIVER, DRIVER_MOB, CAMIUN_NUM, MAGHSAD, CAM_KHALY, CAM_POOR, TOZIH, CAMIUN, CRT, UID)
+    SELECT O.NUMBER, 13, O.REQUEST_NO, O.BARNAMEH, O.DRIVER, O.DRIVER_MOB, O.CAMIUN_NUM, O.MAGHSAD, O.CAM_KHALY, O.CAM_POOR, O.TOZIH, O.CAMIUN, O.CRT, O.UID
+    FROM dbo.OTHER_DTL O
+    WHERE O.TAG = 2
+      AND NOT EXISTS (SELECT 1 FROM dbo.OTHER_DTL O13 WHERE O13.NUMBER = O.NUMBER AND O13.TAG = 13);
+END;
+
+IF OBJECT_ID('dbo.OTHER_DTL_SUB', 'U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.OTHER_DTL_SUB (NUMBER, TAGG, CODE, CAM_KHALY, CAM_POOR, MEGHk, TOZIH, RADIF, VAZNH, CRT, UID)
+    SELECT S.NUMBER, 13, S.CODE, S.CAM_KHALY, S.CAM_POOR, S.MEGHk, S.TOZIH, S.RADIF, S.VAZNH, S.CRT, S.UID
+    FROM dbo.OTHER_DTL_SUB S
+    WHERE S.TAGG = 2
+      AND NOT EXISTS (SELECT 1 FROM dbo.OTHER_DTL_SUB S13 WHERE S13.NUMBER = S.NUMBER AND S13.TAGG = 13);
+END;
+GO
+
+-- ------------------------------------------------------------------------------------
+-- STEP 10: Fix Textual Account Code Typos (Leading Zeroes / Formats) in Treasury
+-- Synchronizes text FHES/THES with verified numeric components matching CUST_HESAB
+-- ------------------------------------------------------------------------------------
+UPDATE P
+SET P.FHES = RTRIM(P.FHES_K) + '-' + RTRIM(P.FHES_M) + '-' + RTRIM(P.FHES_T)
+FROM dbo.PGET_LST P
+WHERE P.FHES IS NOT NULL AND RTRIM(P.FHES) <> ''
+  AND NOT EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.FHES))
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.FHES_K) + '-' + RTRIM(P.FHES_M) + '-' + RTRIM(P.FHES_T));
+
+UPDATE P
+SET P.THES = RTRIM(P.THES_K) + '-' + RTRIM(P.THES_M) + '-' + RTRIM(P.THES_T)
+FROM dbo.PGET_LST P
+WHERE P.THES IS NOT NULL AND RTRIM(P.THES) <> ''
+  AND NOT EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.THES))
+  AND EXISTS (SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes = RTRIM(P.THES_K) + '-' + RTRIM(P.THES_M) + '-' + RTRIM(P.THES_T));
+GO
+";
+
+        public static void DenaFarazMigration(SqlConnection db)
+        {
+            ExecuteBatches(db, DenaFarazMigrationSql);
+        }
+    }
+}

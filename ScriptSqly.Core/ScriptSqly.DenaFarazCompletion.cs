@@ -165,7 +165,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 IF @PREVIEW_ONLY=1
 BEGIN
-    SELECT N'410: پایاپای خرید؛ 411: کنترل خرید؛ 761: قیمت تمام شده کالای فروش رفته. تنظیم معتبر حفظ می‌شود؛ اسناد قبلی تغییر نمی‌کنند.' AS Preview;
+    SELECT N'تکمیل حساب‌های خرید، بهای تمام‌شده و سایر حساب‌های خودگردان جاافتاده؛ استفاده از حساب معادل موجود و بررسی همه ارجاع‌های تنظیمات. کدهای معتبر و اسناد قبلی حفظ می‌شوند.' AS Preview;
     RETURN;
 END;
 BEGIN TRY
@@ -232,6 +232,95 @@ BEGIN TRY
     INSERT dbo.TDETA_HES (N_KOL,NUMBER,TNUMBER,NAME)
     SELECT @Contra,1,1,N'پایاپای خرید'
     WHERE NOT EXISTS (SELECT 1 FROM dbo.TDETA_HES WHERE N_KOL=@Contra AND NUMBER=1 AND TNUMBER=1);
+
+    -- Completing only purchase/cost-of-sales leaves the other self-balancing
+    -- settings dangling in a periodic-inventory DenaFaraz database.
+    -- Roles come from the legacy AUTOMATIC form; classifications were checked
+    -- against the working MrCorrect chart. Customer-specific names are not copied.
+    DECLARE @Roles TABLE(FieldName sysname PRIMARY KEY, DefaultCode int, AccountName nvarchar(100),
+        GroupCode int, AccountType int, Nature int);
+    INSERT @Roles VALUES
+        (N'MOGODIA',121,N'موجودی مواد و کالا',11,1,1),
+        (N'HKHARID',722,N'هزینه های خرید',71,1,2),
+        (N'HDARAM',611,N'تخفیفات درآمد',61,3,2),
+        (N'HAZ_TOL',741,N'کنترل مواد مصرفی تولید',71,3,2),
+        (N'PJHAZ_TOL1',731,N'پایاپای هزینه های تولید و خدمات',71,2,2),
+        (N'PHAZ_TOL',744,N'جذب هزینه های تولید',71,2,2),
+        (N'PPDAST',742,N'کنترل دستمزد',71,3,2),
+        (N'PPSAR',743,N'کنترل سربار تولید',71,3,2),
+        (N'AMALKARD',771,N'عملکرد و انحراف هزینه ها',71,3,2),
+        (N'CONKAL',751,N'کنترل کالای در جریان ساخت',71,3,2);
+    DECLARE @Field sysname,@Default int,@Name nvarchar(100),@Group int,@Type int,@Nature int,
+        @Previous int,@Resolved int,@Command nvarchar(max),@Message nvarchar(2048);
+    DECLARE roles_cur CURSOR LOCAL FAST_FORWARD FOR
+        SELECT FieldName,DefaultCode,AccountName,GroupCode,AccountType,Nature FROM @Roles;
+    OPEN roles_cur;
+    FETCH NEXT FROM roles_cur INTO @Field,@Default,@Name,@Group,@Type,@Nature;
+    WHILE @@FETCH_STATUS=0
+    BEGIN
+        SET @Previous=NULL;
+        -- Only a dangling, explicitly assigned setting is repaired. Null/zero
+        -- optional settings and valid customized account numbers are preserved.
+        SET @Command=N'SELECT @Code=MIN(CONVERT(int,S.' + QUOTENAME(@Field) + N')) FROM dbo.SAZMAN S
+            WHERE S.' + QUOTENAME(@Field) + N'>0 AND NOT EXISTS
+                (SELECT 1 FROM dbo.TOTA_HES T WHERE T.NUMBER=S.' + QUOTENAME(@Field) + N');';
+        EXEC sys.sp_executesql @Command,N'@Code int OUTPUT',@Code=@Previous OUTPUT;
+        IF @Previous IS NOT NULL
+        BEGIN
+            IF @Previous<>@Default
+            BEGIN
+                SET @Message=N'حساب تنظیم ' + @Field + N' با کد ' + CONVERT(nvarchar(20),@Previous) +
+                    N' در کدینگ موجود نیست و کد استاندارد تبدیل هم نیست؛ کدینگ بررسی شود.';
+                THROW 51026,@Message,1;
+            END;
+            SET @Resolved=NULL;
+            SELECT @Resolved=MIN(NUMBER) FROM dbo.TOTA_HES
+            WHERE LTRIM(RTRIM(REPLACE(REPLACE(NAME,N'ي',N'ی'),N'ك',N'ک')))=@Name;
+            IF @Resolved IS NULL
+            BEGIN
+                SET @Resolved=@Default;
+                INSERT dbo.TOTA_HES(NUMBER,NAME,[GROUP],NO_HES,M_D)
+                    VALUES(@Resolved,@Name,@Group,@Type,@Nature);
+            END;
+            -- Reuse an existing equivalent role (Yazd purchase expense is 414),
+            -- rather than creating a duplicate name under the legacy default 722.
+            SET @Command=N'UPDATE S SET ' + QUOTENAME(@Field) + N'=@Code FROM dbo.SAZMAN S
+                WHERE S.' + QUOTENAME(@Field) + N'=@Previous AND NOT EXISTS
+                    (SELECT 1 FROM dbo.TOTA_HES T WHERE T.NUMBER=S.' + QUOTENAME(@Field) + N');';
+            EXEC sys.sp_executesql @Command,N'@Code int,@Previous int',@Code=@Resolved,@Previous=@Previous;
+        END;
+        FETCH NEXT FROM roles_cur INTO @Field,@Default,@Name,@Group,@Type,@Nature;
+    END;
+    CLOSE roles_cur;
+    DEALLOCATE roles_cur;
+
+    -- Do not report conversion success while another assigned root/detail is
+    -- unresolved. Values are read as data; only the fixed role allowlist above
+    -- is used to construct SQL identifiers.
+    SET @Message=NULL;
+    SELECT TOP(1) @Message=N'حساب تنظیم ' + J.FieldName + N' با مقدار ' + CONVERT(nvarchar(40),J.Code) + N' در کدینگ موجود نیست.'
+    FROM dbo.SAZMAN S CROSS APPLY (VALUES
+        (N'SANDOGH',S.SANDOGH),(N'BANKHA',S.BANKHA),(N'BESTANKAR',S.BESTANKAR),(N'BEDEHKAR',S.BEDEHKAR),
+        (N'KHARID',S.KHARID),(N'MKHARID',S.MKHARID),(N'TKHARID',S.TKHARID),(N'HKHARID',S.HKHARID),
+        (N'FROSH',S.FROSH),(N'MFROSH',S.MFROSH),(N'TFROSH',S.TFROSH),(N'HFROSH',S.HFROSH),
+        (N'MOGODIA',S.MOGODIA),(N'DARAM',S.DARAM),(N'HDARAM',S.HDARAM),(N'HAVALAH',S.HAVALAH),
+        (N'HAZ_TOL',S.HAZ_TOL),(N'PJHAZ_TOL1',S.PJHAZ_TOL1),(N'PHAZ_TOL',S.PHAZ_TOL),(N'GHEYMAT',S.GHEYMAT),
+        (N'PPDAST',S.PPDAST),(N'PPSAR',S.PPSAR),(N'AMALKARD',S.AMALKARD),(N'CONKAL',S.CONKAL),(N'PKHARID',S.PKHARID)
+    ) J(FieldName,Code)
+    WHERE J.Code>0 AND NOT EXISTS(SELECT 1 FROM dbo.TOTA_HES T WHERE T.NUMBER=J.Code);
+    IF @Message IS NOT NULL THROW 51027,@Message,1;
+    SELECT TOP(1) @Message=N'حساب تنظیم ' + J.FieldName + N' با مقدار ' + J.Code + N' در کدینگ موجود نیست.'
+    FROM dbo.SAZMAN S CROSS APPLY (VALUES
+        (N'ADA',CONVERT(nvarchar(100),S.ADA)),(N'APA',CONVERT(nvarchar(100),S.APA)),
+        (N'ADV',CONVERT(nvarchar(100),S.ADV)),(N'APV',CONVERT(nvarchar(100),S.APV)),
+        (N'HPOR',CONVERT(nvarchar(100),S.HPOR)),(N'PERSONEL',CONVERT(nvarchar(100),S.PERSONEL)),
+        (N'PERVAM',CONVERT(nvarchar(100),S.PERVAM))
+    ) J(FieldName,Code)
+    WHERE NULLIF(LTRIM(RTRIM(J.Code)),N'') IS NOT NULL AND LTRIM(RTRIM(J.Code))<>N'0'
+        AND NOT EXISTS(SELECT 1 FROM dbo.CUST_HESAB C WHERE C.hes=LTRIM(RTRIM(J.Code)))
+        AND NOT (J.FieldName IN(N'PERSONEL',N'PERVAM') AND
+            EXISTS(SELECT 1 FROM dbo.TOTA_HES T WHERE CONVERT(nvarchar(40),CONVERT(bigint,T.NUMBER))=LTRIM(RTRIM(J.Code))));
+    IF @Message IS NOT NULL THROW 51028,@Message,1;
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH

@@ -24,6 +24,34 @@ END;
 
             CrmAclScript(db);
             AutomationIndexesScript(db);
+            AutomationAvatarScript(db);
+        }
+
+        /// <summary>
+        /// عکس پروفایل کاربران در اتوماسیون — جدولِ جدا از SALA_DTL (مالِ WPF).
+        /// معادل مو‌به‌موی Server/Database/automation_avatars.sql در مخزن Safir. تکرارش بی‌خطر است.
+        /// خطا فقط یعنی «عکس پروفایل کار نمی‌کند» و حروف اولِ نام نشان داده می‌شود؛ پس try/catch.
+        /// </summary>
+        private static void AutomationAvatarScript(SqlConnection db)
+        {
+            try
+            {
+                ExecuteBatches(db, @"
+IF OBJECT_ID(N'dbo.USER_AVATAR', N'U') IS NULL
+    CREATE TABLE [dbo].[USER_AVATAR](
+        [UserId]      INT            NOT NULL CONSTRAINT [PK_USER_AVATAR] PRIMARY KEY,   -- SALA_DTL.IDD
+        [Thumbnail]   VARBINARY(MAX) NOT NULL,
+        [ContentType] NVARCHAR(30)   NOT NULL,
+        [Version]     BIGINT         NOT NULL,
+        [UpdatedAt]   DATETIME2(0)   NOT NULL CONSTRAINT [DF_USER_AVATAR_UPD] DEFAULT (SYSUTCDATETIME())
+    );
+GO
+");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Automation avatar table failed: {ex.Message}");
+            }
         }
 
         /// <summary>

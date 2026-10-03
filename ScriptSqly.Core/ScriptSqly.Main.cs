@@ -3652,6 +3652,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                 if (isCustomCall)
                 {
                     SignedPorsantPermissionScript(db);
+                    PulsePermissionScript(db);
                 }
 
                 //1405/03/05

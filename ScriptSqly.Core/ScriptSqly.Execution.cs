@@ -8,6 +8,10 @@ namespace ScriptSqly.Migrations;
 
 public sealed record MigrationStep(int Number, string Command, string State, long DurationMs);
 public sealed record MigrationFailure(string Command, int ErrorNumber, string Message);
+public sealed class MigrationBusyException : InvalidOperationException
+{
+    public MigrationBusyException() : base("به‌روزرسانی دیگری روی همین دیتابیس در حال اجراست.") { }
+}
 public sealed class MigrationExecutionResult
 {
     public int Executed { get; internal set; }
@@ -50,7 +54,7 @@ EXEC @result=sys.sp_getapplock @Resource=N'Safir.ScriptSqly.Upgrade',
  @LockMode='Exclusive', @LockOwner='Session', @LockTimeout=0;
 SELECT @result;");
         if (acquired < 0)
-            throw new InvalidOperationException("به‌روزرسانی دیگری روی همین دیتابیس در حال اجراست.");
+            throw new MigrationBusyException();
         var previous = CurrentExecution.Value;
         var context = new ExecutionContext { Progress = progress };
         CurrentExecution.Value = context;

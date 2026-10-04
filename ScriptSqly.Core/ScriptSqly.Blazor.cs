@@ -23,6 +23,90 @@ END;
 "); } catch { }
 
             CrmAclScript(db);
+            AutomationIndexesScript(db);
+            AutomationAvatarScript(db);
+        }
+
+        /// <summary>
+        /// عکس پروفایل کاربران در اتوماسیون — جدولِ جدا از SALA_DTL (مالِ WPF).
+        /// معادل مو‌به‌موی Server/Database/automation_avatars.sql در مخزن Safir. تکرارش بی‌خطر است.
+        /// خطا فقط یعنی «عکس پروفایل کار نمی‌کند» و حروف اولِ نام نشان داده می‌شود؛ پس try/catch.
+        /// </summary>
+        private static void AutomationAvatarScript(SqlConnection db)
+        {
+            try
+            {
+                ExecuteBatches(db, @"
+IF OBJECT_ID(N'dbo.USER_AVATAR', N'U') IS NULL
+    CREATE TABLE [dbo].[USER_AVATAR](
+        [UserId]      INT            NOT NULL CONSTRAINT [PK_USER_AVATAR] PRIMARY KEY,   -- SALA_DTL.IDD
+        [Thumbnail]   VARBINARY(MAX) NOT NULL,
+        [ContentType] NVARCHAR(30)   NOT NULL,
+        [Version]     BIGINT         NOT NULL,
+        [UpdatedAt]   DATETIME2(0)   NOT NULL CONSTRAINT [DF_USER_AVATAR_UPD] DEFAULT (SYSUTCDATETIME())
+    );
+GO
+");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Automation avatar table failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ایندکس‌های اتوماسیون (کارتابل، پیام، یادآور، رویداد) — فقط سرعت؛ هیچ رفتاری عوض نمی‌شود.
+        ///
+        /// معادل مو‌به‌مو Server/Database/automation_indexes.sql در مخزن Safir.
+        ///
+        /// هیچ ایندکسِ موجودی حذف یا تغییر نام داده نمی‌شود: نرم‌افزار WPF در کوئری کارتابلش
+        /// نامِ IX_TASKS_Status1 را hint می‌کند (WITH (INDEX(IX_TASKS_Status1))).
+        ///
+        /// اندازه‌گیری روی کپی یزدسپار (۱۱۱ هزار کار، ۴۷۸ هزار رویداد): خلاصه‌ی کارتابل از ۱٬۵۷۶ به ۳۶
+        /// خواندن؛ رویدادهای یک کار از ۲٬۹۶۴ صفحه (اسکنِ کل جدول) به چند صفحه.
+        /// خطا در ساختنِ ایندکس فقط کندی است، نه خرابی؛ پس try/catch.
+        /// </summary>
+        private static void AutomationIndexesScript(SqlConnection db)
+        {
+            try
+            {
+                ExecuteBatches(db, @"
+-- ONLINE = ON (فقط Enterprise/Developer: EngineEdition = 3): ساختنِ ایندکسِ معمولی روی جدولِ بزرگ، تا پایان
+-- ساخت جلوی نوشتنِ نرم‌افزار WPF را می‌گیرد؛ در نسخه‌های دیگر ONLINE خطا می‌دهد، پس آنجا حالتِ عادی.
+DECLARE @opt NVARCHAR(40) = CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS INT) = 3 THEN N' WITH (ONLINE = ON)' ELSE N'' END;
+
+-- کارتابل: همه‌ی کوئری‌ها بر PERSONEL فیلتر می‌کنند؛ ایندکس موجود (STATUS, IDNUM) PERSONEL را کلید ندارد.
+-- INCLUDE: خلاصه‌ی کارتابل (شمارنده‌ها) فقط همین ستون‌ها را می‌خواند، پس کاملاً از ایندکس جواب می‌گیرد.
+IF OBJECT_ID(N'dbo.TASKS', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_TASKS_PERSONEL_STATUS' AND object_id = OBJECT_ID(N'dbo.TASKS'))
+    EXEC (N'CREATE NONCLUSTERED INDEX [IX_TASKS_PERSONEL_STATUS] ON [dbo].[TASKS] ([PERSONEL], [STATUS], [IDNUM] DESC) INCLUDE ([PERIORITY], [STDATE], [ENDATE])' + @opt);
+
+-- رویدادهای یک کار (WHERE IDNUM = ...): کلید خوشه‌ای فقط IDD است. IDD خودش در ایندکس غیرخوشه‌ای
+-- هست، پس ORDER BY IDD هم بدون مرتب‌سازی می‌آید.
+IF OBJECT_ID(N'dbo.EVENTS', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_EVENTS_IDNUM' AND object_id = OBJECT_ID(N'dbo.EVENTS'))
+    EXEC (N'CREATE NONCLUSTERED INDEX [IX_EVENTS_IDNUM] ON [dbo].[EVENTS] ([IDNUM])' + @opt);
+
+-- پیام‌ها: دریافتی/خوانده‌نشده (PERSONEL) و ارسالی/رسیدِ خوانده‌شدن (UID).
+IF OBJECT_ID(N'dbo.MESAGEP', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_MESAGEP_PERSONEL_STATUS' AND object_id = OBJECT_ID(N'dbo.MESAGEP'))
+    EXEC (N'CREATE NONCLUSTERED INDEX [IX_MESAGEP_PERSONEL_STATUS] ON [dbo].[MESAGEP] ([PERSONEL], [STATUS])' + @opt);
+
+IF OBJECT_ID(N'dbo.MESAGEP', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_MESAGEP_UID_STATUS' AND object_id = OBJECT_ID(N'dbo.MESAGEP'))
+    EXEC (N'CREATE NONCLUSTERED INDEX [IX_MESAGEP_UID_STATUS] ON [dbo].[MESAGEP] ([UID], [STATUS])' + @opt);
+
+-- یادآورها: شمارنده‌ی هر دقیقه (STATUS = 1 AND PERSONEL = ...).
+IF OBJECT_ID(N'dbo.REMAINDER', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_REMAINDER_PERSONEL_STATUS' AND object_id = OBJECT_ID(N'dbo.REMAINDER'))
+    EXEC (N'CREATE NONCLUSTERED INDEX [IX_REMAINDER_PERSONEL_STATUS] ON [dbo].[REMAINDER] ([PERSONEL], [STATUS])' + @opt);
+GO
+");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Automation indexes failed: {ex.Message}");
+            }
         }
 
         /// <summary>

@@ -899,16 +899,21 @@ GO
 
 -- View مانده وام هر پرسنل
 CREATE OR ALTER VIEW [dbo].[V_PAY2_LOAN_BALANCE] AS
+-- مانده = جمعِ اقساطی که هنوز کسر نشده‌اند. «تعداد پرداخت × مبلغ قسط» غلط بود: قسطِ آخر کوچک‌تر است
+-- و اگر قسطی جا بیفتد (وامِ غیرفعال یا ماهِ محاسبه‌نشده) ترتیبِ پرداخت به‌هم می‌خورد.
 SELECT
     L.EMP_ID,
     L.LOAN_ID,
     L.AMOUNT                            AS TOTAL_AMOUNT,
-    L.PAID_INST * L.INSTALLMENT         AS TOTAL_PAID,
-    L.AMOUNT - L.PAID_INST*L.INSTALLMENT AS BALANCE,
+    L.AMOUNT - S.UNPAID                 AS TOTAL_PAID,
+    S.UNPAID                            AS BALANCE,
     L.INSTALLMENT                       AS NEXT_INSTALLMENT,
     (L.TOTAL_INST - L.PAID_INST)        AS REMAINING_INST
 FROM PAY2_LOAN L
-WHERE L.IS_ACTIVE = 1 AND L.PAID_INST < L.TOTAL_INST;
+CROSS APPLY (SELECT ISNULL(SUM(LS.AMOUNT), 0) AS UNPAID
+             FROM PAY2_LOAN_SCHED LS
+             WHERE LS.LOAN_ID = L.LOAN_ID AND LS.RUN_ID IS NULL) S
+WHERE L.IS_ACTIVE = 1 AND S.UNPAID > 0;
 GO
 
 -- ================================================================
@@ -2407,7 +2412,8 @@ BEGIN
         SELECT @LEAVE_BAL_DAYS = CAST(BALANCE_MIN AS DECIMAL(10,2)) / 440.0 FROM PAY2_LEAVE_BAL WHERE EMP_ID = @EMP_ID AND YEAR = @PERIOD_DATE / 10000;
 
         SET @LOAN_BAL = NULL;
-        SELECT @LOAN_BAL = ISNULL(SUM(BALANCE), 0) FROM V_PAY2_LOAN_BALANCE WHERE EMP_ID = @EMP_ID;
+        -- مانده‌ی پس از کسرِ قسطِ همین ماه؛ همان عددی که در فیش «مانده وام» چاپ می‌شود
+        SELECT @LOAN_BAL = ISNULL(SUM(BALANCE), 0) - @LOAN_DED FROM V_PAY2_LOAN_BALANCE WHERE EMP_ID = @EMP_ID;
 
         INSERT INTO PAY2_RUN_LINE (
             RUN_ID, EMP_ID, WORK_DAYS, GROSS_PAY, INS_BASE, INS_WORKER, INS_EMPLOYER, TAX_BASE, TAX_AMOUNT,
@@ -2647,7 +2653,12 @@ BEGIN
     DECLARE @LEAVE_PAY BIGINT = CAST(@LEAVE_BAL_DAYS_CALC * @LAST_DAILY AS BIGINT);
 
     DECLARE @BON_SETTLE BIGINT = ISNULL((SELECT TOP 1 DL.AMOUNT * @SENIORITY_FULL FROM PAY2_DECREE_LINE DL INNER JOIN PAY2_ITEM_DEF ID ON DL.ITEM_ID = ID.ITEM_ID WHERE DL.DEC_ID = @LAST_DEC_ID AND ID.ITEM_CODE = 'GROCERY'), 0);
-    DECLARE @LOAN_BALANCE_TOT BIGINT = ISNULL((SELECT SUM(BALANCE) FROM V_PAY2_LOAN_BALANCE WHERE EMP_ID = @EMP_ID), 0);
+    -- بدهیِ همه‌ی وام‌ها، فعال یا غیرفعال («غیرفعال» فقط کسرِ ماهانه را متوقف می‌کند، بدهی را نمی‌بخشد)؛
+    -- وامی که در تسویه‌ی قبلی بسته شده دوباره حساب نمی‌شود.
+    DECLARE @LOAN_BALANCE_TOT BIGINT = ISNULL((
+        SELECT SUM(LS.AMOUNT) FROM PAY2_LOAN_SCHED LS INNER JOIN PAY2_LOAN L ON LS.LOAN_ID = L.LOAN_ID
+        WHERE L.EMP_ID = @EMP_ID AND LS.RUN_ID IS NULL
+          AND ISNULL(L.PURPOSE, N'') NOT LIKE N'%(بسته‌شده در تسویه%'), 0);
 
     INSERT INTO PAY2_SETTLEMENT (EMP_ID, WS_ID, SETTLE_DATE, HIRE_DATE, END_DATE, SENIORITY_DAYS, SENIORITY_YEARS, LAST_SALARY, LAST_DAILY, PREV_SET_ID, PREV_SENIORITY_DAYS, LEAVE_BAL_MIN, LEAVE_BAL_DAYS, EIDI, BON, LEAVE_PAY, SANAVAT, PREV_CREDIT, OTHER_INCOME, PREV_DEBIT, EIDI_TAX, LOAN_BALANCE, OTHER_DED, STATUS, CALC_METHOD, CREATED_BY)
     VALUES (@EMP_ID, @WS_ID, @SETTLE_DATE, @HIRE_DATE, @END_DATE, @SENIORITY_DAYS, @SENIORITY_YEARS, @LAST_SALARY, @LAST_DAILY, @PREV_SET_ID, @PREV_SEN_DAYS, @LEAVE_BAL_MIN, @LEAVE_BAL_DAYS_CALC, @EIDI, @BON_SETTLE, @LEAVE_PAY, @SANAVAT, @PREV_CREDIT, @OTHER_INCOME, 0, @EIDI_TAX, @LOAN_BALANCE_TOT, @OTHER_DED, 1,
@@ -2951,10 +2962,15 @@ BEGIN
         -- بستن قطعی وام‌های فعالِ تسویه‌شده
         IF @LOAN_BALANCE > 0
         BEGIN
-            UPDATE PAY2_LOAN
-            SET IS_ACTIVE = 0,
-                PURPOSE = SUBSTRING(ISNULL(PURPOSE, '') + N' (بسته‌شده در تسویه)', 1, 200)
-            WHERE EMP_ID = @EMP_ID AND IS_ACTIVE = 1 AND PAID_INST < TOTAL_INST;
+            -- وامِ فعال غیرفعال می‌شود؛ وامی که از قبل غیرفعال بود علامتِ جدا می‌گیرد تا «لغو تأیید» فعالش نکند.
+            -- هر دو علامت وام را از تسویه‌ی بعدی بیرون می‌گذارند (بدهی‌اش در همین تسویه کسر شده است).
+            UPDATE L
+            SET PURPOSE = SUBSTRING(ISNULL(L.PURPOSE, '') + CASE WHEN L.IS_ACTIVE = 1 THEN N' (بسته‌شده در تسویه)' ELSE N' (بسته‌شده در تسویه، غیرفعال)' END, 1, 200),
+                IS_ACTIVE = 0
+            FROM PAY2_LOAN L
+            WHERE L.EMP_ID = @EMP_ID
+              AND ISNULL(L.PURPOSE, N'') NOT LIKE N'%(بسته‌شده در تسویه%'
+              AND EXISTS (SELECT 1 FROM PAY2_LOAN_SCHED LS WHERE LS.LOAN_ID = L.LOAN_ID AND LS.RUN_ID IS NULL);
         END
 
         COMMIT TRANSACTION;

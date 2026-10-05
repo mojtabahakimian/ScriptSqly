@@ -9372,6 +9372,38 @@ GO
             TryExecuteCostCloseBatch(db, legacyViewsTag30,
                 "ويوهاي موجودي - TAG=30",
                 "اسکريپت 42-legacy-views-tag30.sql را اجرا کنيد.");
+
+            // --- 44-conversion-sanad-nos30.sql ---
+            string conversionSanadNos30 = @"
+/* ═══════════════════════════════════════════════════════════════════
+   سند تبدیل کالا (TAG=30): نوع سند ۱۰ ← ۳۰
+
+   ── چرا ──
+   سند برگه‌ی تبدیل تا امروز با NO_S=10 ثبت می‌شد، که نوعِ سند انتقالی
+   است؛ پس در دفتر با سندهای انتقالی قاطی دیده می‌شد. از این به بعد
+   ConversionRebuildService با NO_S=30 ثبت می‌کند و این اسکریپت سندهای
+   قبلی را هم به ۳۰ می‌برد.
+
+   ── چه سندی عوض می‌شود ──
+   فقط سربرگی که یک برگه‌ی TAG=30 به آن اشاره می‌کند *و* هیچ آرتیکلِ
+   غیرِ تبدیل رویش نیست — سند انتقالیِ واقعی دست نمی‌خورد.
+   اجرای دوباره بی‌اثر است.
+   ═══════════════════════════════════════════════════════════════════ */
+
+UPDATE  d
+SET     NO_S = 30
+FROM    dbo.DEED_HED d
+WHERE   d.NO_S = 10
+  AND   EXISTS     (SELECT 1 FROM dbo.HEAD_LST h WHERE h.TAG = 30 AND h.N_S = d.N_S)
+  AND   NOT EXISTS (SELECT 1 FROM dbo.DEED_DTL x WHERE x.N_S = d.N_S AND ISNULL(x.TAG, 0) <> 30);
+GO
+
+PRINT N'سند تبدیل کالا: نوع سند ۳۰ شد.';
+GO
+";
+            TryExecuteCostCloseBatch(db, conversionSanadNos30,
+                "نوع سند تبديل کالا (۳۰)",
+                "اسکريپت 44-conversion-sanad-nos30.sql را اجرا کنيد.");
         }
 
         private static void TryExecuteCostCloseBatch(SqlConnection db, string script, string what, string hint)

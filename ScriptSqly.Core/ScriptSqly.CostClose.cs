@@ -5648,30 +5648,48 @@ BEGIN
 
     DELETE dbo.CC_ItemMargin WHERE RunId = @RunId;
 
+    /* ─── بازه‌ی تاریخِ ماه، نه KALAS.MM ───
+       قبلاً از KALAS با شرط MM = @Month خوانده می‌شد. MM آنجا
+       dbo.Umonth(DATE_N) است و KALAS روی kalas_sub دوازده جدولِ دیگر را
+       OUTER JOIN می‌کند؛ پس این شرط روی هیچ ایندکسی نمی‌نشیند و هر بار
+       کل سال خوانده می‌شود. روی سرورِ مشتری (مهر ۱۴۰۵) همین باعث شد S12 که
+       حدود ۹۰ ثانیه طول می‌کشید، سه بار پشتِ سرِ هم به سقفِ ۱۵ دقیقه بخورد
+       — بدون هیچ قفلی، فقط CPU.
+       حالا مستقیم از kalas_sub (منبعِ خودِ KALAS) با بازه‌ی DATE_N خوانده
+       می‌شود. از JOINهای KALAS فقط دو INNER JOIN (TAGCOD و STUF_DEF) سطر
+       کم می‌کنند و همان دو مانده‌اند. بازه دقیقاً معنای MM را دارد (رقم‌های
+       ماه در سالِ @DT1) و خروجی روی ماه‌های ۱ تا ۶ با نسخه‌ی KALAS یکی است. */
+    DECLARE @Lo BIGINT = (@DT1 / 10000) * 10000 + @Month * 100;
+    DECLARE @Hi BIGINT = @Lo + 99;
+
     /* ─── فروش: TAGCODE = 2 ─── */
     ;WITH Forush AS (
-        SELECT  k.CODE                       AS Code,
+        SELECT  CAST(s.CODE AS BIGINT)       AS Code,
                 SUM(k.MEGHk)                 AS Qty,
                 SUM(k.MEGH)                  AS Weight,
                 SUM(k.MABL_K)                AS Gross,      -- پيش از تخفيف
                 SUM(ISNULL(k.N_MOIN, 0))     AS Discount,   -- تخفيف
                 SUM(k.KHFR)                  AS NetSales,   -- مبلغ خالص
-                SUM(k.MABRIAL)               AS CostRial    -- AVRAGE × MEGHk
-        FROM    dbo.KALAS k
-        WHERE   k.TAGCODE = 2
-          AND   k.MM = @Month
-        GROUP BY k.CODE
+                SUM(k.mabrial)               AS CostRial    -- AVRAGE × MEGHk
+        FROM    dbo.kalas_sub k
+        JOIN    dbo.TAGCOD   tg ON tg.CODE = k.TAG
+        JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
+        WHERE   k.TAG = 2
+          AND   k.DATE_N BETWEEN @Lo AND @Hi
+        GROUP BY CAST(s.CODE AS BIGINT)
     ),
     /* ─── برگشت از فروش: TAGCODE = 4 ─── */
     Bargasht AS (
-        SELECT  k.CODE           AS Code,
+        SELECT  CAST(s.CODE AS BIGINT) AS Code,
                 SUM(k.MEGHk)     AS Qty,
                 SUM(k.KHFR)      AS NetAmount,
-                SUM(k.MABRIAL)   AS CostRial
-        FROM    dbo.KALAS k
-        WHERE   k.TAGCODE = 4
-          AND   k.MM = @Month
-        GROUP BY k.CODE
+                SUM(k.mabrial)   AS CostRial
+        FROM    dbo.kalas_sub k
+        JOIN    dbo.TAGCOD   tg ON tg.CODE = k.TAG
+        JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
+        WHERE   k.TAG = 4
+          AND   k.DATE_N BETWEEN @Lo AND @Hi
+        GROUP BY CAST(s.CODE AS BIGINT)
     )
     INSERT dbo.CC_ItemMargin
         (RunId, Code, QtySold, WeightKg, SalesAmount, CostAmount,
@@ -5694,7 +5712,8 @@ BEGIN
             ISNULL(b.Qty, 0)
     FROM    Forush f
     LEFT    JOIN Bargasht b ON b.Code = f.Code
-    WHERE   f.Qty <> 0;
+    WHERE   f.Qty <> 0
+    OPTION  (RECOMPILE);   -- @Lo/@Hi متغیرند؛ بدون RECOMPILE تخمینِ تعدادِ سطرها کور است
 
     /* ─── هشدار: کالاي فروش‌رفته بدون نرخ کاردکس ───
        اگر MABRIAL صفر باشد يعني AVRAGE در کاردکس صفر است و
@@ -7183,6 +7202,11 @@ BEGIN
 
     DELETE dbo.CC_ItemMarginUnit WHERE RunId = @RunId;
 
+    /* بازه‌ی تاریخِ ماه به‌جای KALAS.MM — دلیلش کنارِ همین کد در
+       CC_sp_S12_CalcMargin (19-margin-fix-kalas.sql) آمده است. */
+    DECLARE @Lo BIGINT = (@DT1 / 10000) * 10000 + @Month * 100;
+    DECLARE @Hi BIGINT = @Lo + 99;
+
     /* نگاشت انبار → واحد. یک انبار نباید به دو واحد بخورد؛ اگر خورد،
        کوچک‌ترین UnitId برداشته می‌شود تا سطر دوباره‌شماری نشود. */
     ;WITH AnbarUnit AS (
@@ -7192,32 +7216,38 @@ BEGIN
     ),
     /* ─── فروش: TAGCODE = 2 ─── */
     Forush AS (
-        SELECT  k.CODE                       AS Code,
+        SELECT  CAST(s.CODE AS BIGINT)       AS Code,
                 au.UnitId                    AS UnitId,
                 SUM(k.MEGHk)                 AS Qty,
                 SUM(k.MEGH)                  AS Weight,
                 SUM(k.MABL_K)                AS Gross,
                 SUM(ISNULL(k.N_MOIN, 0))     AS Discount,
                 SUM(k.KHFR)                  AS NetSales,
-                SUM(k.MABRIAL)               AS CostRial
-        FROM    dbo.KALAS k
-        LEFT    JOIN AnbarUnit au ON au.Anbar = k.ANBARCODE
-        WHERE   k.TAGCODE = 2
-          AND   k.MM = @Month
-        GROUP BY k.CODE, au.UnitId
+                SUM(k.mabrial)               AS CostRial
+        FROM    dbo.kalas_sub k
+        JOIN    dbo.TAGCOD   tg ON tg.CODE = k.TAG
+        JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
+        LEFT    JOIN dbo.TCOD_ANBAR ta ON ta.CODE = k.ANBAR   -- = KALAS.ANBARCODE
+        LEFT    JOIN AnbarUnit au ON au.Anbar = ta.CODE
+        WHERE   k.TAG = 2
+          AND   k.DATE_N BETWEEN @Lo AND @Hi
+        GROUP BY CAST(s.CODE AS BIGINT), au.UnitId
     ),
     /* ─── برگشت از فروش: TAGCODE = 4 ─── */
     Bargasht AS (
-        SELECT  k.CODE           AS Code,
+        SELECT  CAST(s.CODE AS BIGINT) AS Code,
                 au.UnitId        AS UnitId,
                 SUM(k.MEGHk)     AS Qty,
                 SUM(k.KHFR)      AS NetAmount,
-                SUM(k.MABRIAL)   AS CostRial
-        FROM    dbo.KALAS k
-        LEFT    JOIN AnbarUnit au ON au.Anbar = k.ANBARCODE
-        WHERE   k.TAGCODE = 4
-          AND   k.MM = @Month
-        GROUP BY k.CODE, au.UnitId
+                SUM(k.mabrial)   AS CostRial
+        FROM    dbo.kalas_sub k
+        JOIN    dbo.TAGCOD   tg ON tg.CODE = k.TAG
+        JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
+        LEFT    JOIN dbo.TCOD_ANBAR ta ON ta.CODE = k.ANBAR   -- = KALAS.ANBARCODE
+        LEFT    JOIN AnbarUnit au ON au.Anbar = ta.CODE
+        WHERE   k.TAG = 4
+          AND   k.DATE_N BETWEEN @Lo AND @Hi
+        GROUP BY CAST(s.CODE AS BIGINT), au.UnitId
     )
     INSERT dbo.CC_ItemMarginUnit
         (RunId, UnitId, Code, QtySold, WeightKg, SalesAmount, CostAmount,
@@ -7242,7 +7272,8 @@ BEGIN
     FROM    Forush f
     LEFT    JOIN Bargasht b ON b.Code = f.Code
                            AND ISNULL(b.UnitId, -1) = ISNULL(f.UnitId, -1)
-    WHERE   f.Qty <> 0;
+    WHERE   f.Qty <> 0
+    OPTION  (RECOMPILE);
 
     INSERT dbo.CC_RunLog (RunId, StepCode, Severity, Message, ContextJson)
     SELECT  @RunId, 'S12', 1,
@@ -7269,7 +7300,7 @@ GO
 ";
             TryExecuteCostCloseBatch(db, marginByUnit,
                 "CC_ItemMarginUnit و CC_sp_S12u_MarginByUnit",
-                "اسکریپت 26-margin-by-unit.sql را اجرا کنید (به KALAS.ANBARCODE و CC_UnitAnbar نیاز دارد).");
+                "اسکریپت 26-margin-by-unit.sql را اجرا کنید (به kalas_sub، TCOD_ANBAR و CC_UnitAnbar نیاز دارد).");
 
             // --- 27-formula-copy.sql ---
             string formulaCopy = @"

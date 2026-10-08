@@ -228,10 +228,10 @@ VALUES
  N'1=مانده حساب معین پرسنل از DEED_DTL محاسبه می‌شود | 0=بدون کسر مساعده',
  N'فعال (هوشمند)|غیرفعال',    'BOOL', 2),
 
-('ADV_SCOPE',            'CURRENT_MONTH', 'CURRENT_MONTH|OPEN_BALANCE', 'CURRENT_MONTH', N'مساعده',
+('ADV_SCOPE',            'CURRENT_MONTH', 'CURRENT_MONTH|OPEN_BALANCE|ACCOUNT_ITEMS', 'CURRENT_MONTH', N'مساعده',
  N'محدوده محاسبه مساعده',
- N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق',
- N'فقط ماه جاری|کل مانده باز','TEXT', 2),
+ N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش و سند دستیِ همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (پرداخت‌های خزانه و سند حقوق کسر نمی‌شوند)',
+ N'فقط ماه جاری|کل مانده باز|فاکتور فروش و سند دستیِ ماه','TEXT', 2),
 
 ('ADV_USE_HES_T_FILTER', '1',             '1|0',                    '1',             N'مساعده',
  N'آیا فیلتر HES_T (تفصیلی=کد پرسنل) اعمال شود؟',
@@ -1766,6 +1766,102 @@ BEGIN
  END CATCH
 END;
 GO
+
+-- ── PAY2_RUN_ACC_ITEM — اقلامِ حساب شخص که در یک اجرا کسر شد ─────────────
+-- فیش حقوقی این‌ها را ردیف‌به‌ردیف در «کسورات» نشان می‌دهد. عکسِ لحظه‌ی محاسبه
+-- است: اصلاح بعدیِ فاکتور یا سند، فیشِ صادرشده را عوض نمی‌کند.
+IF OBJECT_ID(N'dbo.PAY2_RUN_ACC_ITEM', N'U') IS NULL
+ CREATE TABLE dbo.PAY2_RUN_ACC_ITEM
+ (
+   ITEM_ID INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_PAY2_RUN_ACC_ITEM PRIMARY KEY,
+   RUN_ID  INT NOT NULL,
+   EMP_ID  INT NOT NULL,
+   N_S     FLOAT NULL,
+   NO_S    FLOAT NULL,
+   TAG     FLOAT NULL,
+   NUMBER  FLOAT NULL,
+   DATE_S  BIGINT NULL,
+   TITLE   NVARCHAR(300) NOT NULL,
+   AMOUNT  BIGINT NOT NULL,
+   CONSTRAINT FK_PAY2_RAI_LINE FOREIGN KEY(RUN_ID, EMP_ID) REFERENCES dbo.PAY2_RUN_LINE(RUN_ID, EMP_ID) ON DELETE CASCADE
+ );
+GO
+IF OBJECT_ID(N'dbo.PAY2_RUN_ACC_ITEM', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_PAY2_RAI_RUN_EMP' AND object_id = OBJECT_ID(N'dbo.PAY2_RUN_ACC_ITEM'))
+    CREATE INDEX IX_PAY2_RAI_RUN_EMP ON dbo.PAY2_RUN_ACC_ITEM(RUN_ID, EMP_ID);
+GO
+
+-- ── FN_PAY2_ACC_ITEMS — بدهی‌های ماهِ حساب شخص پرسنل ───────────────────────
+-- برای ADV_SCOPE = 'ACCOUNT_ITEMS' («فاکتور فروش و سندهای دستیِ همین ماه»).
+--
+-- فقط این‌ها، روی حساب شخصِ پرسنل و با تاریخ همان ماه:
+--   • فاکتور فروش   : سند فروش (NO_S=2) با TAG=13، طرف بدهکار
+--   • برگشت از فروش : سند برگشت (NO_S=4) با TAG 4/25، طرف بستانکار — منفی، تا کالای
+--                     پس‌داده‌شده دوبار کسر نشود
+--   • سند دستی      : سند عمومی (NO_S=0)، طرف بدهکار
+-- عمداً نه پرداخت‌های خزانه (پرداختِ خودِ حقوق ماه قبل همان‌جاست) و نه سند حقوق.
+--
+-- ACC_T کد کامل حساب شخص است (مثلاً 213-1-1-505). اگر فقط شماره‌ی تفصیلی باشد،
+-- زیر حساب مساعده‌ی کارگاه (ADV_HES) گرفته می‌شود.
+-- دیتابیسِ فقط‌حقوق (بدون DEED_DTL/DEED_HED) این تابع را نمی‌گیرد: تابعِ درون‌خطی، مثل View،
+-- جدول‌هایش را هنگام ساخت لازم دارد و بدون این گارد کل به‌روزرسانی متوقف می‌شد.
+IF OBJECT_ID(N'dbo.DEED_DTL', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.DEED_HED', N'U') IS NOT NULL
+EXEC(N'
+CREATE OR ALTER FUNCTION dbo.FN_PAY2_ACC_ITEMS(@WS_ID INT, @PERIOD_DATE BIGINT)
+RETURNS TABLE
+AS RETURN
+WITH Emp AS (
+    SELECT E.EMP_ID,
+           FULL_CODE = CASE WHEN CHARINDEX(''-'', TRIM(E.ACC_T)) > 0 THEN TRIM(E.ACC_T)
+                            ELSE (SELECT TOP 1 TRIM(W.ACC_CODE) FROM dbo.PAY2_WORKSHOP_ACC W
+                                  WHERE W.WS_ID = E.WS_ID AND W.ACC_KEY = N''ADV_HES'') + N''-'' + TRIM(E.ACC_T) END
+    FROM dbo.PAY2_EMPLOYEE E
+    WHERE E.WS_ID = @WS_ID AND NULLIF(TRIM(E.ACC_T), N'''') IS NOT NULL
+),
+Acc AS (
+    SELECT Emp.EMP_ID,
+           K  = TRY_CAST(JSON_VALUE(J.A, ''$[0]'') AS INT),
+           M  = TRY_CAST(JSON_VALUE(J.A, ''$[1]'') AS INT),
+           T  = ISNULL(TRY_CAST(JSON_VALUE(J.A, ''$[2]'') AS INT), 0),
+           T2 = ISNULL(TRY_CAST(JSON_VALUE(J.A, ''$[3]'') AS INT), 0),
+           T3 = ISNULL(TRY_CAST(JSON_VALUE(J.A, ''$[4]'') AS INT), 0),
+           T4 = ISNULL(TRY_CAST(JSON_VALUE(J.A, ''$[5]'') AS INT), 0)
+    FROM Emp
+    CROSS APPLY (SELECT A = N''[""'' + REPLACE(Emp.FULL_CODE, N''-'', N''"",""'') + N''""]'') J
+)
+SELECT Acc.EMP_ID, D.N_S, H.NO_S, D.TAG, D.NUMBER, H.DATE_S,
+       -- شماره‌ی فاکتور پایدار است؛ شماره‌ی سند (N_S) نه — نرم‌افزار WPF آن را از نو شماره
+       -- می‌زند. پس ردیفِ سند دستی با شرح و تاریخش شناخته می‌شود، نه با شماره.
+       TITLE = CAST(
+           CASE WHEN H.NO_S = 2 THEN N''فاکتور فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
+                WHEN H.NO_S = 4 THEN N''برگشت از فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
+                ELSE N''سند دستی: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120)
+           END
+           + N'' — '' + CAST(H.DATE_S / 10000 AS NVARCHAR(4)) + N''/'' + RIGHT(N''0'' + CAST(H.DATE_S / 100 % 100 AS NVARCHAR(2)), 2)
+           + N''/'' + RIGHT(N''0'' + CAST(H.DATE_S % 100 AS NVARCHAR(2)), 2) AS NVARCHAR(300)),
+       AMOUNT = CAST(CASE WHEN H.NO_S = 4 THEN -D.BES ELSE D.BED END AS BIGINT)
+FROM Acc
+JOIN dbo.DEED_DTL D ON D.HES_K = Acc.K AND D.HES_M = Acc.M
+                   AND ISNULL(D.HES_T, 0)  = Acc.T  AND ISNULL(D.HES_T2, 0) = Acc.T2
+                   AND ISNULL(D.HES_T3, 0) = Acc.T3 AND ISNULL(D.HES_T4, 0) = Acc.T4
+JOIN dbo.DEED_HED H ON H.N_S = D.N_S
+WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100 + 99
+  AND (   (H.NO_S = 2 AND D.TAG = 13 AND D.BED > 0)
+       OR (H.NO_S = 4 AND D.TAG IN (4, 25) AND D.BES > 0)
+       -- سند افتتاحیه و اختتامیه هم «سند عمومی» (NO_S=0) هستند ولی بدهیِ این ماه نیستند:
+       -- افتتاحیه مانده‌ی سال قبل را می‌آورد و اختتامیه حساب‌ها را می‌بندد.
+       OR (H.NO_S = 0 AND D.BED > 0
+           AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%''));
+');
+GO
+
+-- گزینه‌ی تازه‌ی محدوده‌ی مساعده برای دیتابیس‌های موجود (صفحه‌ی تنظیمات فقط مقادیر همین فهرست را می‌پذیرد)
+UPDATE dbo.PAY2_CONFIG
+SET CFG_OPTIONS = N'CURRENT_MONTH|OPEN_BALANCE|ACCOUNT_ITEMS',
+    OPT_LABELS  = N'فقط ماه جاری|کل مانده باز|فاکتور فروش و سند دستیِ ماه',
+    DESC_FA     = N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش و سند دستیِ همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (پرداخت‌های خزانه و سند حقوق کسر نمی‌شوند)'
+WHERE CFG_KEY = N'ADV_SCOPE' AND ISNULL(CFG_OPTIONS, N'') NOT LIKE N'%ACCOUNT_ITEMS%';
+GO
 ");
 
                 // ===========================================================
@@ -1978,6 +2074,8 @@ BEGIN
     SET @NEW_RUN_ID = SCOPE_IDENTITY();
 
     CREATE TABLE #AdvResult (EMP_ID INT, PCODE NVARCHAR(50), FULL_NAME NVARCHAR(150), RAW_BALANCE BIGINT, MANUAL_EXCL BIGINT, ADVANCE_DEDUCTION BIGINT);
+    -- اقلامی که SP_PAY2_GET_ADVANCES در حالت ACCOUNT_ITEMS خوانده (فقط همان حالت پرش می‌کند)
+    CREATE TABLE #PAY2_ACC_ITEMS (EMP_ID INT, N_S FLOAT, NO_S FLOAT, TAG FLOAT, NUMBER FLOAT, DATE_S BIGINT, TITLE NVARCHAR(300), AMOUNT BIGINT);
     IF @ADV_ENABLED = 1
     BEGIN
         INSERT INTO #AdvResult (EMP_ID, PCODE, FULL_NAME, RAW_BALANCE, MANUAL_EXCL, ADVANCE_DEDUCTION)
@@ -2488,6 +2586,15 @@ BEGIN
 
     CLOSE cur_emp; DEALLOCATE cur_emp;
     DROP TABLE #AdvResult;
+
+    -- اقلامِ حساب شخص (فاکتور فروش / سند دستی) که امروز کسر شد، برای فیش ردیف‌به‌ردیف
+    -- نگه داشته می‌شوند. عکسِ همین لحظه است؛ اصلاح بعدیِ فاکتور فیشِ صادرشده را عوض نمی‌کند.
+    INSERT INTO PAY2_RUN_ACC_ITEM (RUN_ID, EMP_ID, N_S, NO_S, TAG, NUMBER, DATE_S, TITLE, AMOUNT)
+    SELECT @NEW_RUN_ID, F.EMP_ID, F.N_S, F.NO_S, F.TAG, F.NUMBER, F.DATE_S, F.TITLE, F.AMOUNT
+    FROM #PAY2_ACC_ITEMS F
+    WHERE EXISTS (SELECT 1 FROM PAY2_RUN_LINE RL
+                  WHERE RL.RUN_ID = @NEW_RUN_ID AND RL.EMP_ID = F.EMP_ID AND RL.ADVANCE_DED > 0);
+    DROP TABLE #PAY2_ACC_ITEMS;
 
     UPDATE PAY2_PERIOD SET STATUS = 3 WHERE PER_ID = @PER_ID;
 
@@ -3161,6 +3268,53 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- ADV_SCOPE = 'ACCOUNT_ITEMS' («فاکتور فروش و سندهای دستیِ همین ماه»): فقط اقلامِ
+    -- FN_PAY2_ACC_ITEMS کسر می‌شود، نه مانده‌ی حساب — مانده، پرداختِ خودِ حقوقِ ماه قبل را
+    -- هم دارد. حساب مساعده اینجا لازم نیست وقتی ACC_T کد کامل حساب شخص است.
+    IF EXISTS (SELECT 1 FROM PAY2_CONFIG WITH (NOLOCK) WHERE CFG_KEY = N'ADV_SCOPE' AND CFG_VALUE = N'ACCOUNT_ITEMS')
+    BEGIN
+        -- کدِ فقط‌تفصیلی (بدون «-») تنها زیر حساب مساعده معنا دارد؛ بدونِ آن، اقلامِ این پرسنل
+        -- بی‌صدا صفر می‌شد.
+        IF NOT EXISTS (SELECT 1 FROM PAY2_WORKSHOP_ACC WITH (NOLOCK)
+                       WHERE WS_ID = @WS_ID AND ACC_KEY = N'ADV_HES' AND NULLIF(TRIM(ACC_CODE), N'') IS NOT NULL)
+           AND EXISTS (SELECT 1 FROM PAY2_EMPLOYEE WITH (NOLOCK)
+                       WHERE WS_ID = @WS_ID AND IS_ACTIVE = 1 AND NULLIF(TRIM(ACC_T), N'') IS NOT NULL AND CHARINDEX('-', ACC_T) = 0)
+        BEGIN
+            RAISERROR(N'کد حساب بعضی پرسنل فقط شماره‌ی تفصیلی است و حساب مساعده (ADV_HES) برای این کارگاه تنظیم نشده؛ حساب مساعده را تنظیم کنید یا کد کامل حساب پرسنل را بنویسید.', 16, 1);
+            RETURN;
+        END;
+
+        -- اقلام یک‌بار خوانده می‌شوند. اگر فراخوان (SP_PAY2_CALC_RUN) جدول #PAY2_ACC_ITEMS
+        -- ساخته باشد، همین اقلام برای فیش در آن هم ریخته می‌شود تا جمعِ کسر و ردیف‌های فیش
+        -- از یک خواندن باشند — سندی که در فاصله‌ی دو خواندن ثبت شود آن دو را از هم جدا نکند.
+        SELECT EMP_ID, N_S, NO_S, TAG, NUMBER, DATE_S, TITLE, AMOUNT
+        INTO #ACC_ITEMS
+        FROM dbo.FN_PAY2_ACC_ITEMS(@WS_ID, @PERIOD_DATE);
+
+        IF OBJECT_ID('tempdb..#PAY2_ACC_ITEMS') IS NOT NULL
+            INSERT INTO #PAY2_ACC_ITEMS (EMP_ID, N_S, NO_S, TAG, NUMBER, DATE_S, TITLE, AMOUNT)
+            SELECT EMP_ID, N_S, NO_S, TAG, NUMBER, DATE_S, TITLE, AMOUNT FROM #ACC_ITEMS;
+
+        ;WITH I AS (
+            SELECT EMP_ID, SUM(AMOUNT) AS AMT FROM #ACC_ITEMS GROUP BY EMP_ID
+        ), X AS (
+            SELECT EMP_ID, SUM(EXCL_AMOUNT) AS EXCL FROM PAY2_ADVANCE_EXCL WITH (NOLOCK)
+            WHERE PERIOD_DATE BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100 + 99
+            GROUP BY EMP_ID
+        )
+        SELECT E.EMP_ID, E.ACC_T AS PCODE, E.LAST_NAME + N' ' + E.FIRST_NAME AS FULL_NAME,
+               CAST(ISNULL(I.AMT, 0) AS BIGINT) AS RAW_BALANCE,
+               CAST(ISNULL(X.EXCL, 0) AS BIGINT) AS MANUAL_EXCL,
+               CAST(CASE WHEN ISNULL(I.AMT, 0) - ISNULL(X.EXCL, 0) > 0
+                         THEN ISNULL(I.AMT, 0) - ISNULL(X.EXCL, 0) ELSE 0 END AS BIGINT) AS ADVANCE_DEDUCTION
+        FROM PAY2_EMPLOYEE E WITH (NOLOCK)
+        INNER JOIN PAY2_PERIOD P WITH (NOLOCK) ON P.WS_ID = E.WS_ID AND P.PERIOD_DATE = @PERIOD_DATE
+        LEFT JOIN I ON I.EMP_ID = E.EMP_ID
+        LEFT JOIN X ON X.EMP_ID = E.EMP_ID
+        WHERE E.WS_ID = @WS_ID AND E.IS_ACTIVE = 1 AND E.ACC_T IS NOT NULL;
+        RETURN;
+    END;
+
     -- 1. خواندن کد کامل حساب مساعده
     DECLARE @FULL_HES NVARCHAR(100);
     SELECT @FULL_HES = ACC_CODE
@@ -3538,7 +3692,9 @@ BEGIN
     IF @ACC_INS_PAYABLE IS NULL AND EXISTS (SELECT 1 FROM PAY2_RUN_LINE WHERE RUN_ID = @RUN_ID AND (INS_WORKER + INS_EMPLOYER) > 0) SET @MissingAcc += N'اداره بیمه، ';
     IF @ACC_TAX_PAYABLE IS NULL AND EXISTS (SELECT 1 FROM PAY2_RUN_LINE WHERE RUN_ID = @RUN_ID AND TAX_AMOUNT > 0) SET @MissingAcc += N'اداره مالیات، ';
     IF @ACC_LOAN_HES IS NULL AND EXISTS (SELECT 1 FROM PAY2_RUN_LINE WHERE RUN_ID = @RUN_ID AND LOAN_DED > 0) SET @MissingAcc += N'صندوق وام، ';
-    IF @ACC_ADV_HES IS NULL AND EXISTS (SELECT 1 FROM PAY2_RUN_LINE WHERE RUN_ID = @RUN_ID AND ADVANCE_DED > 0) SET @MissingAcc += N'حساب مساعده، ';
+    -- کسرِ اقلامِ حساب شخص (PAY2_RUN_ACC_ITEM) به حساب خودِ پرسنل برمی‌گردد و حساب مساعده نمی‌خواهد.
+    IF @ACC_ADV_HES IS NULL AND EXISTS (SELECT 1 FROM PAY2_RUN_LINE RL WHERE RL.RUN_ID = @RUN_ID AND RL.ADVANCE_DED > 0
+        AND NOT EXISTS (SELECT 1 FROM PAY2_RUN_ACC_ITEM AI WHERE AI.RUN_ID = RL.RUN_ID AND AI.EMP_ID = RL.EMP_ID)) SET @MissingAcc += N'حساب مساعده، ';
     -- OTHER_DED دو جزء دارد: «سایر کسورات» دستی (KASR_OTHER) و «کسر کار».
     -- در سند تفصیلی کامل فقط جزء اول به حساب سایر کسورات می‌رود؛ کسر کار
     -- حسابِ مقصد ندارد و هزینه‌ی حقوق را کم می‌کند. پس اگر ماهی فقط کسر کار
@@ -3650,7 +3806,12 @@ BEGIN
         TAX_AMOUNT BIGINT,
         LOAN_DED BIGINT,
         ADVANCE_DED BIGINT,
-        OTHER_DED BIGINT
+        OTHER_DED BIGINT,
+        -- مقصدِ بستانکارِ کسر مساعده. وقتی کسر از اقلامِ حساب شخص آمده (فاکتور فروش و سند
+        -- دستی)، آن اقلام همین حالا روی حساب خودِ پرسنل بدهکارند؛ پس بستانکار هم همان حساب
+        -- است و مانده‌ی او بعد از حقوق دقیقاً خالصِ فیش می‌شود. حساب مساعده آن را دوبار کم می‌کرد.
+        ADV_ACC NVARCHAR(100),
+        ADV_ITEMS BIT
     );
 
     ;WITH EmpAcc AS (
@@ -3689,7 +3850,8 @@ BEGIN
     )
     INSERT INTO #SalarySplit (
         EMP_ID, FULL_NAME, ACC_T, EXP_TOLID, EXP_EDARI, EXP_FOROSH, EXP_KHADAMAT,
-        NET_PAY, PERSONAL_DEBT, INS_WORKER, INS_EMPLOYER, TAX_AMOUNT, LOAN_DED, ADVANCE_DED, OTHER_DED
+        NET_PAY, PERSONAL_DEBT, INS_WORKER, INS_EMPLOYER, TAX_AMOUNT, LOAN_DED, ADVANCE_DED, OTHER_DED,
+        ADV_ACC, ADV_ITEMS
     )
     SELECT
         B.EMP_ID, E.FULL_NAME, E.ACC_T,
@@ -3699,8 +3861,12 @@ BEGIN
         CASE WHEN B.DAYS_TOLID = 0 AND B.DAYS_EDARI = 0 AND B.DAYS_FOROSH = 0 THEN B.R_K + (B.EXP_BASE - (B.R_T + B.R_E + B.R_F + B.R_K)) ELSE B.R_K END,
         B.NET_PAY,
         CASE WHEN B.NET_PAY < 0 THEN -B.NET_PAY ELSE 0 END,
-        B.INS_WORKER, B.INS_EMPLOYER, B.TAX_AMOUNT, B.LOAN_DED, B.ADVANCE_DED, B.OTHER_DED
+        B.INS_WORKER, B.INS_EMPLOYER, B.TAX_AMOUNT, B.LOAN_DED, B.ADVANCE_DED, B.OTHER_DED,
+        CASE WHEN AI.HAS_ITEMS = 1 THEN E.ACC_T ELSE @ACC_ADV_HES END,
+        ISNULL(AI.HAS_ITEMS, 0)
     FROM SplitBase B
+    OUTER APPLY (SELECT TOP 1 CAST(1 AS BIT) AS HAS_ITEMS FROM PAY2_RUN_ACC_ITEM X
+                 WHERE X.RUN_ID = @RUN_ID AND X.EMP_ID = B.EMP_ID) AI
     INNER JOIN EmpAcc E ON B.EMP_ID = E.EMP_ID;
 
     -- ─────────────────────────────────────────────────────────────────
@@ -3754,7 +3920,7 @@ BEGIN
         SELECT CAST(@ACC_LOAN_HES AS NVARCHAR(100)), CAST(N'کسر اقساط وام: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(LOAN_DED AS BIGINT), CAST('LOAN_HES' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 9
         FROM #SalarySplit WHERE LOAN_DED > 0
         UNION ALL
-        SELECT CAST(@ACC_ADV_HES AS NVARCHAR(100)), CAST(N'تصفیه مساعده: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 10
+        SELECT CAST(ADV_ACC AS NVARCHAR(100)), CAST(CASE WHEN ADV_ITEMS = 1 THEN N'تسویه فاکتور و سند حساب: ' ELSE N'تصفیه مساعده: ' END + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 10
         FROM #SalarySplit WHERE ADVANCE_DED > 0
         UNION ALL
         SELECT CAST(@ACC_OTHER_DED_HES AS NVARCHAR(100)), CAST(N'سایر کسورات: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(OTHER_DED AS BIGINT), CAST('OTHER_DED' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 11
@@ -3800,7 +3966,7 @@ BEGIN
         SELECT CAST(@ACC_LOAN_HES AS NVARCHAR(100)), CAST(N'کسر اقساط وام: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(LOAN_DED AS BIGINT), CAST('LOAN_HES' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 10
         FROM #SalarySplit WHERE LOAN_DED > 0
         UNION ALL
-        SELECT CAST(@ACC_ADV_HES AS NVARCHAR(100)), CAST(N'تصفیه مساعده: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 11
+        SELECT CAST(ADV_ACC AS NVARCHAR(100)), CAST(CASE WHEN ADV_ITEMS = 1 THEN N'تسویه فاکتور و سند حساب: ' ELSE N'تصفیه مساعده: ' END + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 11
         FROM #SalarySplit WHERE ADVANCE_DED > 0
         UNION ALL
         SELECT CAST(@ACC_OTHER_DED_HES AS NVARCHAR(100)), CAST(N'سایر کسورات: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(OTHER_DED AS BIGINT), CAST('OTHER_DED' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 12
@@ -4082,7 +4248,7 @@ BEGIN
             (N'کسر بیمه سهم کارگر', SS.INS_WORKER),
             (N'کسر مالیات',         SS.TAX_AMOUNT),
             (N'کسر قسط وام',        SS.LOAN_DED),
-            (N'تصفیه مساعده',       SS.ADVANCE_DED),
+            (CASE WHEN SS.ADV_ITEMS = 1 THEN N'کسر فاکتور و سند حساب' ELSE N'تصفیه مساعده' END, SS.ADVANCE_DED),
             (N'سایر کسورات',        ISNULL(A.KASR_OTHER, 0)),
             (N'کسر کار',            SS.OTHER_DED - ISNULL(A.KASR_OTHER, 0))
         ) D(LABEL, AMOUNT)
@@ -4099,7 +4265,7 @@ BEGIN
         SELECT CAST(@ACC_LOAN_HES AS NVARCHAR(100)), CAST(N'کسر اقساط وام: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(LOAN_DED AS BIGINT), CAST('LOAN_HES' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 6
         FROM #SalarySplit WHERE LOAN_DED > 0
         UNION ALL
-        SELECT CAST(@ACC_ADV_HES AS NVARCHAR(100)), CAST(N'تصفیه مساعده: ' + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 7
+        SELECT CAST(ADV_ACC AS NVARCHAR(100)), CAST(CASE WHEN ADV_ITEMS = 1 THEN N'تسویه فاکتور و سند حساب: ' ELSE N'تصفیه مساعده: ' END + @ML + N' | ' + FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(ADVANCE_DED AS BIGINT), CAST('ADVANCE_SETTLE' AS NVARCHAR(50)), CAST(EMP_ID AS INT), CAST(FULL_NAME AS NVARCHAR(150)), 7
         FROM #SalarySplit WHERE ADVANCE_DED > 0
         UNION ALL
         SELECT CAST(@ACC_OTHER_DED_HES AS NVARCHAR(100)), CAST(N'سایر کسورات: ' + @ML + N' | ' + SS.FULL_NAME AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(A.KASR_OTHER AS BIGINT), CAST('OTHER_DED' AS NVARCHAR(50)), CAST(SS.EMP_ID AS INT), CAST(SS.FULL_NAME AS NVARCHAR(150)), 8

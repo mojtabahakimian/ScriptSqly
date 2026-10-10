@@ -2078,7 +2078,7 @@ BEGIN
 			IF @PreventWithoutPattern = 1
 				PRINT N'خطا: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و ثبت فاکتور مسدود است.';
 			ELSE
-				PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و با درصد خودِ سطر حساب شد.';
+				PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و پورسانت برای این کالا محاسبه نشد.';
 			FETCH NEXT FROM MissingItemsCursor
 			INTO @MissingItemName;
 		END;
@@ -2155,36 +2155,7 @@ BEGIN
 		SET @TotalPorsant = ISNULL(@TotalPorsant, 0);
 		SET @TotalMablk = ISNULL(@TotalMablk, 0);
 
-		-- ========== ۶. سهم بخشی که الگو نرخی برایش ندارد ==========
-		-- کالای بدون نرخ در الگو دیگر صفر نمی‌گیرد؛ خالصش به‌علاوه‌ی ارزش افزوده و منهای
-		-- تخفیف سربرگ با درصدِ خودِ سطر حساب می‌شود. عیناً AUTO_BAZ...CL_PORSANT_RULE.ByPattern.
-		DECLARE @UncoveredNet FLOAT = 0;
-
-		SELECT @UncoveredNet = SUM(ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0))
-		FROM dbo.INVO_LST AS IL
-			LEFT JOIN
-			(
-				SELECT CODE, MIN(PORSANT) AS PORSANT
-				FROM dbo.VISITORS_PORSANT_KALA
-				WHERE PORID = @PORID
-				GROUP BY CODE
-				HAVING COUNT(PORSANT) = COUNT(*) AND MIN(PORSANT) = MAX(PORSANT)
-			) AS R
-				ON R.CODE = IL.CODE
-		WHERE IL.NUMBER = @NUMBER
-			  AND IL.TAG = @TAG
-			  AND (@TAG <> 24 OR ISNULL(IL.ANBAR, 0) <> 0)
-			  AND ISNULL(IL.JAY, 0) = 0
-			  AND R.CODE IS NULL;
-
-		SET @TotalPorsant = @TotalPorsant
-							+ ROUND((ISNULL(@UncoveredNet, 0) - @HeadTakhfif
-									 + CASE WHEN @IncludeVat = 1 THEN @HeadMbaa ELSE 0 END)
-									* ISNULL(@RowDarsad, 0) / 100.0, 0);
-
-		-- درصدِ سطر ورودیِ همین محاسبه است، پس بازنویسی نمی‌شود. اگر مثل قبل با «درصد
-		-- مؤثر» پر شود، اجرای بعدی از همان عددِ کوچک‌شده شروع می‌کند و مبلغ هر بار
-		-- پایین‌تر می‌رود — حلقه‌ای که هیچ‌وقت به عدد پایدار نمی‌رسد.
+		-- الگو و درصد دستی دو روش جدا هستند؛ اقلام بدون نرخ سهمی ندارند.
 		SET @Darsad = ISNULL(@RowDarsad, 0);
 	END;
 

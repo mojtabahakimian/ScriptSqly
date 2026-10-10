@@ -1915,6 +1915,21 @@ BEGIN
 	-- اگر پس از تمام تلاش‌ها ویزیتور پیدا نشد، با خطا خارج شو
 	IF @VisitorID IS NULL OR @VisitorID = ''
 	BEGIN
+		-- نبودِ مالک فقط وقتی هشدار است که برای همین فاکتور پورسانت خواسته شده باشد.
+		-- مسیرِ ناقص یا سطر دستی نشانه تنظیم پورسانت است؛ گرید خالی به تنهایی معیار نیست.
+		IF @AutoDetected = 1
+			AND NOT EXISTS (SELECT 1 FROM dbo.VISITOR_DTL
+				WHERE NUMBER = @NUMBER AND TAG = @TAG
+				  AND (PORID IS NOT NULL OR ISNULL(DARSAD, 0) <> 0 OR ISNULL(PURSANT, 0) <> 0
+					OR ISNULL(STAT, 0) = 1 OR ISNULL(TOZIH, N'') NOT LIKE N'روش%'))
+			AND NOT EXISTS (SELECT 1 FROM dbo.CUST_HESAB
+				WHERE hes = @CustomerID AND NULLIF(LTRIM(RTRIM(ROUTE_NAME)), N'') IS NOT NULL
+				  AND ROUTE_NAME <> N'NULL')
+			AND NOT EXISTS (SELECT 1 FROM dbo.Visit_route_dtl WHERE COUST_NO = @CustomerID)
+			AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST h JOIN dbo.SALA_DTL s
+				ON s.IDD = h.UID OR s.IDD = dbo.GETUSERCOD(h.USER_NAME)
+				WHERE h.NUMBER = @NUMBER AND h.TAG = @TAG AND s.PORID IS NOT NULL)
+			RETURN;
 		PRINT N'خطا: ویزیتور مالک این فاکتور شناسایی نشد. محاسبه متوقف شد.';
 		RETURN;
 	END;
@@ -1974,6 +1989,19 @@ BEGIN
 
 	IF @PORID IS NULL AND @NoPattern = 0
 	BEGIN
+		-- شناسایی خودکار یک کاربرِ بدون الگوی پیش‌فرض، الزام به پورسانت نیست.
+		-- فقط پس از شناسایی مالک و بررسی الگوی واقعی او تصمیم می‌گیریم؛ گرید خالی
+		-- نباید شکست شناسایی یا خطای الگوی تنظیم‌شده را پنهان کند.
+		-- سطر دستیِ خالی همچنان هشدار می‌گیرد؛ سطر صفرِ خودِ رویه نشانه فعال بودن پورسانت نیست.
+		IF @AutoDetected = 1 AND @IdentificationMethod NOT LIKE N'روش 1:%' AND NOT EXISTS
+		(
+			SELECT 1 FROM dbo.VISITOR_DTL
+			WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID
+				AND (ISNULL(STAT, 0) = 1
+					 OR ISNULL(TOZIH, N'') NOT LIKE N'روش%')
+		)
+			RETURN;
+
 		PRINT N'خطا: الگوی پیش فرض پورسانت (PORID) برای حساب ویزیتور یافت نشد' + @VisitorID;
 		UPDATE dbo.VISITOR_DTL
 		SET LOG = ISNULL(@LOG, N'خطا: الگوی پیش فرض پورسانت برای حساب ویزیتور یافت نشد')

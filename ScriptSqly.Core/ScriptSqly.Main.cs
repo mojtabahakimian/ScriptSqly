@@ -1915,6 +1915,21 @@ BEGIN
 	-- اگر پس از تمام تلاش‌ها ویزیتور پیدا نشد، با خطا خارج شو
 	IF @VisitorID IS NULL OR @VisitorID = ''
 	BEGIN
+		-- نبودِ مالک فقط وقتی هشدار است که برای همین فاکتور پورسانت خواسته شده باشد.
+		-- مسیرِ ناقص یا سطر دستی نشانه تنظیم پورسانت است؛ گرید خالی به تنهایی معیار نیست.
+		IF @AutoDetected = 1
+			AND NOT EXISTS (SELECT 1 FROM dbo.VISITOR_DTL
+				WHERE NUMBER = @NUMBER AND TAG = @TAG
+				  AND (PORID IS NOT NULL OR ISNULL(DARSAD, 0) <> 0 OR ISNULL(PURSANT, 0) <> 0
+					OR ISNULL(STAT, 0) = 1 OR ISNULL(TOZIH, N'') NOT LIKE N'روش%'))
+			AND NOT EXISTS (SELECT 1 FROM dbo.CUST_HESAB
+				WHERE hes = @CustomerID AND NULLIF(LTRIM(RTRIM(ROUTE_NAME)), N'') IS NOT NULL
+				  AND ROUTE_NAME <> N'NULL')
+			AND NOT EXISTS (SELECT 1 FROM dbo.Visit_route_dtl WHERE COUST_NO = @CustomerID)
+			AND NOT EXISTS (SELECT 1 FROM dbo.HEAD_LST h JOIN dbo.SALA_DTL s
+				ON s.IDD = h.UID OR s.IDD = dbo.GETUSERCOD(h.USER_NAME)
+				WHERE h.NUMBER = @NUMBER AND h.TAG = @TAG AND s.PORID IS NOT NULL)
+			RETURN;
 		PRINT N'خطا: ویزیتور مالک این فاکتور شناسایی نشد. محاسبه متوقف شد.';
 		RETURN;
 	END;
@@ -1974,6 +1989,19 @@ BEGIN
 
 	IF @PORID IS NULL AND @NoPattern = 0
 	BEGIN
+		-- شناسایی خودکار یک کاربرِ بدون الگوی پیش‌فرض، الزام به پورسانت نیست.
+		-- فقط پس از شناسایی مالک و بررسی الگوی واقعی او تصمیم می‌گیریم؛ گرید خالی
+		-- نباید شکست شناسایی یا خطای الگوی تنظیم‌شده را پنهان کند.
+		-- سطر دستیِ خالی همچنان هشدار می‌گیرد؛ سطر صفرِ خودِ رویه نشانه فعال بودن پورسانت نیست.
+		IF @AutoDetected = 1 AND @IdentificationMethod NOT LIKE N'روش 1:%' AND NOT EXISTS
+		(
+			SELECT 1 FROM dbo.VISITOR_DTL
+			WHERE NUMBER = @NUMBER AND TAG = @TAG AND CUST_NO = @VisitorID
+				AND (ISNULL(STAT, 0) = 1
+					 OR ISNULL(TOZIH, N'') NOT LIKE N'روش%')
+		)
+			RETURN;
+
 		PRINT N'خطا: الگوی پیش فرض پورسانت (PORID) برای حساب ویزیتور یافت نشد' + @VisitorID;
 		UPDATE dbo.VISITOR_DTL
 		SET LOG = ISNULL(@LOG, N'خطا: الگوی پیش فرض پورسانت برای حساب ویزیتور یافت نشد')
@@ -2050,7 +2078,7 @@ BEGIN
 			IF @PreventWithoutPattern = 1
 				PRINT N'خطا: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و ثبت فاکتور مسدود است.';
 			ELSE
-				PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و با درصد خودِ سطر حساب شد.';
+				PRINT N'تذکر: کالای «' + @MissingItemName + N'» در این الگو نرخ ندارد و پورسانت برای این کالا محاسبه نشد.';
 			FETCH NEXT FROM MissingItemsCursor
 			INTO @MissingItemName;
 		END;
@@ -2127,36 +2155,7 @@ BEGIN
 		SET @TotalPorsant = ISNULL(@TotalPorsant, 0);
 		SET @TotalMablk = ISNULL(@TotalMablk, 0);
 
-		-- ========== ۶. سهم بخشی که الگو نرخی برایش ندارد ==========
-		-- کالای بدون نرخ در الگو دیگر صفر نمی‌گیرد؛ خالصش به‌علاوه‌ی ارزش افزوده و منهای
-		-- تخفیف سربرگ با درصدِ خودِ سطر حساب می‌شود. عیناً AUTO_BAZ...CL_PORSANT_RULE.ByPattern.
-		DECLARE @UncoveredNet FLOAT = 0;
-
-		SELECT @UncoveredNet = SUM(ISNULL(IL.MABL_K, 0) - ISNULL(IL.N_MOIN, 0))
-		FROM dbo.INVO_LST AS IL
-			LEFT JOIN
-			(
-				SELECT CODE, MIN(PORSANT) AS PORSANT
-				FROM dbo.VISITORS_PORSANT_KALA
-				WHERE PORID = @PORID
-				GROUP BY CODE
-				HAVING COUNT(PORSANT) = COUNT(*) AND MIN(PORSANT) = MAX(PORSANT)
-			) AS R
-				ON R.CODE = IL.CODE
-		WHERE IL.NUMBER = @NUMBER
-			  AND IL.TAG = @TAG
-			  AND (@TAG <> 24 OR ISNULL(IL.ANBAR, 0) <> 0)
-			  AND ISNULL(IL.JAY, 0) = 0
-			  AND R.CODE IS NULL;
-
-		SET @TotalPorsant = @TotalPorsant
-							+ ROUND((ISNULL(@UncoveredNet, 0) - @HeadTakhfif
-									 + CASE WHEN @IncludeVat = 1 THEN @HeadMbaa ELSE 0 END)
-									* ISNULL(@RowDarsad, 0) / 100.0, 0);
-
-		-- درصدِ سطر ورودیِ همین محاسبه است، پس بازنویسی نمی‌شود. اگر مثل قبل با «درصد
-		-- مؤثر» پر شود، اجرای بعدی از همان عددِ کوچک‌شده شروع می‌کند و مبلغ هر بار
-		-- پایین‌تر می‌رود — حلقه‌ای که هیچ‌وقت به عدد پایدار نمی‌رسد.
+		-- الگو و درصد دستی دو روش جدا هستند؛ اقلام بدون نرخ سهمی ندارند.
 		SET @Darsad = ISNULL(@RowDarsad, 0);
 	END;
 
@@ -3364,6 +3363,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                 {
                     SignedPorsantPermissionScript(db);
                     PulsePermissionScript(db);
+                    AccAuditScript(db); //رئیس حسابداری مجازی در Safir
                 }
 
                 //1405/03/05

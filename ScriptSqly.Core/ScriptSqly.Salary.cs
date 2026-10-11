@@ -1809,6 +1809,7 @@ GO
 -- دیتابیسِ فقط‌حقوق (بدون DEED_DTL/DEED_HED) این تابع را نمی‌گیرد: تابعِ درون‌خطی، مثل View،
 -- جدول‌هایش را هنگام ساخت لازم دارد و بدون این گارد کل به‌روزرسانی متوقف می‌شد.
 IF OBJECT_ID(N'dbo.DEED_DTL', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.DEED_HED', N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.PGET_HED', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.PGET_LST', N'U') IS NOT NULL
 EXEC(N'
 CREATE OR ALTER FUNCTION dbo.FN_PAY2_ACC_ITEMS(@WS_ID INT, @PERIOD_DATE BIGINT)
 RETURNS TABLE
@@ -1856,12 +1857,15 @@ WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100
        -- افتتاحیه مانده‌ی سال قبل را می‌آورد و اختتامیه حساب‌ها را می‌بندد.
        OR (H.NO_S = 0 AND D.BED > 0
            AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%'')
-       -- جفتِ هر ردیف خزانه با همان مبلغ و همان شرح شناخته می‌شود؛ یک سند خزانه ردیف‌های
-       -- زیادی برای پرسنل مختلف دارد.
+       -- طرف مقابل از خودِ ردیف خزانه (PGET_LST: از حساب ← به حساب) خوانده می‌شود، نه از
+       -- ردیف‌های سند: یک سند خزانه ردیف‌های زیادی برای پرسنل مختلف دارد و مبلغ/شرحِ یکسان
+       -- می‌توانست واریز بانکیِ یک نفر را به هزینه‌ی نفر دیگر جفت کند.
        OR (H.NO_S = 5 AND D.BED > 0
-           AND EXISTS (SELECT 1 FROM dbo.DEED_DTL C
-                       WHERE C.N_S = D.N_S AND C.HES_K BETWEEN 700 AND 799 AND C.BES = D.BED
-                         AND ISNULL(C.SHARH, N'''') = ISNULL(D.SHARH, N''''))));
+           AND EXISTS (SELECT 1 FROM dbo.PGET_HED PH JOIN dbo.PGET_LST PL ON PL.ID = PH.ID
+                       WHERE PH.N_S = D.N_S AND PL.FHES_K BETWEEN 700 AND 799 AND PL.MABL = D.BED
+                         AND PL.THES_K = D.HES_K AND PL.THES_M = D.HES_M
+                         AND ISNULL(PL.THES_T, 0)  = ISNULL(D.HES_T, 0)  AND ISNULL(PL.THES_T2, 0) = ISNULL(D.HES_T2, 0)
+                         AND ISNULL(PL.THES_T3, 0) = ISNULL(D.HES_T3, 0) AND ISNULL(PL.THES_T4, 0) = ISNULL(D.HES_T4, 0))));
 ');
 GO
 
@@ -4060,13 +4064,13 @@ BEGIN
         INSERT INTO #EmpItem (EMP_ID, ITEM_ID, ITEM_NAME, TAFSILI, AMOUNT, SORT)
         SELECT D.EMP_ID, D.ITEM_ID,
                -- مثل سند قدیمی، تعداد روزِ کارکرد کنار حقوق روزانه می‌آید (مثلاً ۲۴ روز
-               -- برای کسی که کل ماه را کار نکرده). ریل رسمی با DAYSB حساب می‌شود که
-               -- در WORK_DAYS نشسته و ریل اسمی با DAYS که در NOMINAL_DAYS است.
+               -- برای کسی که کل ماه را کار نکرده). همان روزی که موتور با آن حساب کرده:
+               -- PAY_BASE_DAYS قلم، ۱ = DAYS (در NOMINAL_DAYS) و ۲ = DAYSB (در WORK_DAYS).
                ISNULL(ISNULL(D.ITEM_NAME_SNAP, I.ITEM_NAME), N'قلم حکم')
-               + ISNULL(N' (' + FORMAT(CASE ISNULL(D.ITEM_CODE_SNAP, I.ITEM_CODE)
-                                           WHEN 'BASE_SAL_B' THEN RL.WORK_DAYS
-                                           WHEN 'BASE_SAL'   THEN RL.NOMINAL_DAYS END, '0.##')
-                        + N' روز کارکرد)', N''),
+               + CASE WHEN ISNULL(D.ITEM_CODE_SNAP, I.ITEM_CODE) IN ('BASE_SAL_B', 'BASE_SAL')
+                      THEN ISNULL(N' (' + FORMAT(CASE WHEN I.PAY_BASE_DAYS = 1 THEN RL.NOMINAL_DAYS ELSE RL.WORK_DAYS END, '0.##')
+                                  + N' روز کارکرد)', N'')
+                      ELSE N'' END,
                ISNULL(I.EXP_TAFSILI, 9),
                D.AMOUNT,
                ISNULL(I.SORT_ORDER, 999)

@@ -1799,7 +1799,10 @@ GO
 --   • برگشت از فروش : سند برگشت (NO_S=4) با TAG 4/25، طرف بستانکار — منفی، تا کالای
 --                     پس‌داده‌شده دوبار کسر نشود
 --   • سند دستی      : سند عمومی (NO_S=0)، طرف بدهکار
--- عمداً نه پرداخت‌های خزانه (پرداختِ خودِ حقوق ماه قبل همان‌جاست) و نه سند حقوق.
+--   • سند خزانه     : (NO_S=5) طرف بدهکار، فقط وقتی طرف مقابلش در همان سند حساب هزینه
+--                     (۷xx) است — مثل «هزینه ۲۳٪ بیمه» یا «حقوق ثابت». واریز بانکی، انتقال
+--                     حقوق و پول‌های عبوری طرف مقابل دیگری دارند و کسر نمی‌شوند.
+-- سند حقوق (NO_S=11) هیچ‌وقت.
 --
 -- ACC_T کد کامل حساب شخص است (مثلاً 213-1-1-505). اگر فقط شماره‌ی تفصیلی باشد،
 -- زیر حساب مساعده‌ی کارگاه (ADV_HES) گرفته می‌شود.
@@ -1835,6 +1838,7 @@ SELECT Acc.EMP_ID, D.N_S, H.NO_S, D.TAG, D.NUMBER, H.DATE_S,
        TITLE = CAST(
            CASE WHEN H.NO_S = 2 THEN N''فاکتور فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
                 WHEN H.NO_S = 4 THEN N''برگشت از فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
+                WHEN H.NO_S = 5 THEN N''سند خزانه: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120)
                 ELSE N''سند دستی: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120)
            END
            + N'' — '' + CAST(H.DATE_S / 10000 AS NVARCHAR(4)) + N''/'' + RIGHT(N''0'' + CAST(H.DATE_S / 100 % 100 AS NVARCHAR(2)), 2)
@@ -1851,7 +1855,13 @@ WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100
        -- سند افتتاحیه و اختتامیه هم «سند عمومی» (NO_S=0) هستند ولی بدهیِ این ماه نیستند:
        -- افتتاحیه مانده‌ی سال قبل را می‌آورد و اختتامیه حساب‌ها را می‌بندد.
        OR (H.NO_S = 0 AND D.BED > 0
-           AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%''));
+           AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%'')
+       -- جفتِ هر ردیف خزانه با همان مبلغ و همان شرح شناخته می‌شود؛ یک سند خزانه ردیف‌های
+       -- زیادی برای پرسنل مختلف دارد.
+       OR (H.NO_S = 5 AND D.BED > 0
+           AND EXISTS (SELECT 1 FROM dbo.DEED_DTL C
+                       WHERE C.N_S = D.N_S AND C.HES_K BETWEEN 700 AND 799 AND C.BES = D.BED
+                         AND ISNULL(C.SHARH, N'''') = ISNULL(D.SHARH, N''''))));
 ');
 GO
 
@@ -3670,7 +3680,11 @@ BEGIN
     SELECT TOP 1 @NegEmpId = RL.EMP_ID, @NegEmpName = E.LAST_NAME + N' ' + E.FIRST_NAME, @NegAmount = RL.NET_PAY
     FROM PAY2_RUN_LINE RL INNER JOIN PAY2_EMPLOYEE E ON RL.EMP_ID = E.EMP_ID
     WHERE RL.RUN_ID = @RUN_ID AND RL.NET_PAY < 0
-      AND NOT (RL.WORK_DAYS = 0 AND RL.LOAN_DED = 0 AND RL.ADVANCE_DED = 0 AND RL.OTHER_DED = 0);
+      AND NOT (RL.WORK_DAYS = 0 AND RL.LOAN_DED = 0 AND RL.OTHER_DED = 0
+               -- کسرِ اقلام حساب شخص (مثلاً «هزینه ۲۳٪ بیمه» برای پرسنلِ فقط‌بیمه) بدهیِ خودِ
+               -- اوست و در سند جفتِ بدهکار/بستانکار روی همان حساب می‌شود؛ خالص منفی‌اش مجاز است.
+               AND (RL.ADVANCE_DED = 0 OR EXISTS (SELECT 1 FROM PAY2_RUN_ACC_ITEM AI
+                                                  WHERE AI.RUN_ID = RL.RUN_ID AND AI.EMP_ID = RL.EMP_ID)));
 
     IF @NegEmpId IS NOT NULL
     BEGIN
@@ -4045,13 +4059,21 @@ BEGIN
 
         INSERT INTO #EmpItem (EMP_ID, ITEM_ID, ITEM_NAME, TAFSILI, AMOUNT, SORT)
         SELECT D.EMP_ID, D.ITEM_ID,
-               ISNULL(ISNULL(D.ITEM_NAME_SNAP, I.ITEM_NAME), N'قلم حکم'),
+               -- مثل سند قدیمی، تعداد روزِ کارکرد کنار حقوق روزانه می‌آید (مثلاً ۲۴ روز
+               -- برای کسی که کل ماه را کار نکرده). ریل رسمی با DAYSB حساب می‌شود که
+               -- در WORK_DAYS نشسته و ریل اسمی با DAYS که در NOMINAL_DAYS است.
+               ISNULL(ISNULL(D.ITEM_NAME_SNAP, I.ITEM_NAME), N'قلم حکم')
+               + ISNULL(N' (' + FORMAT(CASE ISNULL(D.ITEM_CODE_SNAP, I.ITEM_CODE)
+                                           WHEN 'BASE_SAL_B' THEN RL.WORK_DAYS
+                                           WHEN 'BASE_SAL'   THEN RL.NOMINAL_DAYS END, '0.##')
+                        + N' روز کارکرد)', N''),
                ISNULL(I.EXP_TAFSILI, 9),
                D.AMOUNT,
                ISNULL(I.SORT_ORDER, 999)
         FROM PAY2_RUN_DETAIL D
         LEFT JOIN PAY2_ITEM_DEF I ON I.ITEM_ID = D.ITEM_ID
         INNER JOIN #Rail R ON R.EMP_ID = D.EMP_ID
+        INNER JOIN PAY2_RUN_LINE RL ON RL.RUN_ID = D.RUN_ID AND RL.EMP_ID = D.EMP_ID
         WHERE D.RUN_ID = @RUN_ID
           AND ISNULL(D.ITEM_TYPE_SNAP, I.ITEM_TYPE) IN (1, 2)
           AND D.AMOUNT <> 0

@@ -230,7 +230,7 @@ VALUES
 
 ('ADV_SCOPE',            'CURRENT_MONTH', 'CURRENT_MONTH|OPEN_BALANCE|ACCOUNT_ITEMS', 'CURRENT_MONTH', N'مساعده',
  N'محدوده محاسبه مساعده',
- N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش و سند دستیِ همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (پرداخت‌های خزانه و سند حقوق کسر نمی‌شوند)',
+ N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش، سند دستی و سند خزانه‌ای که طرف مقابلش حساب هزینه (۷xx) است، همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (واریز و انتقال‌های خزانه و سند حقوق کسر نمی‌شوند)',
  N'فقط ماه جاری|کل مانده باز|فاکتور فروش و سند دستیِ ماه','TEXT', 2),
 
 ('ADV_USE_HES_T_FILTER', '1',             '1|0',                    '1',             N'مساعده',
@@ -1070,6 +1070,7 @@ CREATE TABLE [dbo].[PAY2_RUN_DETAIL]
     [ITEM_TYPE_SNAP] TINYINT NULL,
     [INS_SUBJECT_AMOUNT] BIGINT NULL,                                      -- بخش مبلغ اسمی که در همان Run مشمول بیمه بوده
     [TAX_SUBJECT_AMOUNT] BIGINT NULL,                                      -- بخش مبلغ اسمی که در همان Run مشمول مالیات بوده
+    [PAY_BASE_DAYS_SNAP] TINYINT NULL,                                     -- مبنای روزِ پرداخت هنگام محاسبه (شرح سند)
     [INS_SUBJECT] BIT    NOT NULL,                                           -- مشمول بیمه بود؟
     [TAX_SUBJECT] BIT    NOT NULL,                                           -- مشمول مالیات بود؟
 
@@ -1390,6 +1391,7 @@ IF COL_LENGTH('dbo.PAY2_RUN_DETAIL','CALC_BASIS_SNAP') IS NULL ALTER TABLE dbo.P
 IF COL_LENGTH('dbo.PAY2_RUN_DETAIL','ITEM_TYPE_SNAP') IS NULL ALTER TABLE dbo.PAY2_RUN_DETAIL ADD ITEM_TYPE_SNAP TINYINT NULL;
 IF COL_LENGTH('dbo.PAY2_RUN_DETAIL','INS_SUBJECT_AMOUNT') IS NULL ALTER TABLE dbo.PAY2_RUN_DETAIL ADD INS_SUBJECT_AMOUNT BIGINT NULL;
 IF COL_LENGTH('dbo.PAY2_RUN_DETAIL','TAX_SUBJECT_AMOUNT') IS NULL ALTER TABLE dbo.PAY2_RUN_DETAIL ADD TAX_SUBJECT_AMOUNT BIGINT NULL;
+IF COL_LENGTH('dbo.PAY2_RUN_DETAIL','PAY_BASE_DAYS_SNAP') IS NULL ALTER TABLE dbo.PAY2_RUN_DETAIL ADD PAY_BASE_DAYS_SNAP TINYINT NULL;  -- مبنای روزِ پرداخت هنگام محاسبه (شرح سند)
 IF COL_LENGTH('dbo.PAY2_ATTENDANCE','SHORTAGE_H') IS NULL ALTER TABLE dbo.PAY2_ATTENDANCE ADD SHORTAGE_H DECIMAL(6,2) NOT NULL CONSTRAINT DF_ATT_SHRT DEFAULT(0);
 
 -- نگاشت «قلم حکم ← شمارهٔ تفصیلیِ حساب هزینه» برای سند تفصیلی کامل (DEED_MODE=3).
@@ -1799,9 +1801,9 @@ GO
 --   • برگشت از فروش : سند برگشت (NO_S=4) با TAG 4/25، طرف بستانکار — منفی، تا کالای
 --                     پس‌داده‌شده دوبار کسر نشود
 --   • سند دستی      : سند عمومی (NO_S=0)، طرف بدهکار
---   • سند خزانه     : (NO_S=5) طرف بدهکار، فقط وقتی طرف مقابلش در همان سند حساب هزینه
---                     (۷xx) است — مثل «هزینه ۲۳٪ بیمه» یا «حقوق ثابت». واریز بانکی، انتقال
---                     حقوق و پول‌های عبوری طرف مقابل دیگری دارند و کسر نمی‌شوند.
+--   • سند خزانه     : ردیف خزانه‌ای که «به حسابِ» شخص است و «از حسابش» یک حساب هزینه
+--                     (گروه «هزینه ها» در TOTA_HES) — مثل «هزینه ۲۳٪ بیمه» یا «حقوق ثابت».
+--                     واریز بانکی، انتقال حقوق و پول‌های عبوری از حساب دیگری‌اند و کسر نمی‌شوند.
 -- سند حقوق (NO_S=11) هیچ‌وقت.
 --
 -- ACC_T کد کامل حساب شخص است (مثلاً 213-1-1-505). اگر فقط شماره‌ی تفصیلی باشد،
@@ -1810,6 +1812,7 @@ GO
 -- جدول‌هایش را هنگام ساخت لازم دارد و بدون این گارد کل به‌روزرسانی متوقف می‌شد.
 IF OBJECT_ID(N'dbo.DEED_DTL', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.DEED_HED', N'U') IS NOT NULL
    AND OBJECT_ID(N'dbo.PGET_HED', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.PGET_LST', N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.TOTA_HES', N'U') IS NOT NULL
 EXEC(N'
 CREATE OR ALTER FUNCTION dbo.FN_PAY2_ACC_ITEMS(@WS_ID INT, @PERIOD_DATE BIGINT)
 RETURNS TABLE
@@ -1832,40 +1835,53 @@ Acc AS (
            T4 = ISNULL(TRY_CAST(JSON_VALUE(J.A, ''$[5]'') AS INT), 0)
     FROM Emp
     CROSS APPLY (SELECT A = N''[""'' + REPLACE(Emp.FULL_CODE, N''-'', N''"",""'') + N''""]'') J
+),
+Items AS (
+    SELECT Acc.EMP_ID, D.N_S, H.NO_S, D.TAG, D.NUMBER, H.DATE_S,
+           -- شماره‌ی فاکتور پایدار است؛ شماره‌ی سند (N_S) نه — نرم‌افزار WPF آن را از نو شماره
+           -- می‌زند. پس ردیفِ سند دستی با شرح و تاریخش شناخته می‌شود، نه با شماره.
+           LABEL = CASE WHEN H.NO_S = 2 THEN N''فاکتور فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
+                        WHEN H.NO_S = 4 THEN N''برگشت از فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
+                        ELSE N''سند دستی: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120) END,
+           AMOUNT = CASE WHEN H.NO_S = 4 THEN -D.BES ELSE D.BED END
+    FROM Acc
+    JOIN dbo.DEED_DTL D ON D.HES_K = Acc.K AND D.HES_M = Acc.M
+                       AND ISNULL(D.HES_T, 0)  = Acc.T  AND ISNULL(D.HES_T2, 0) = Acc.T2
+                       AND ISNULL(D.HES_T3, 0) = Acc.T3 AND ISNULL(D.HES_T4, 0) = Acc.T4
+    JOIN dbo.DEED_HED H ON H.N_S = D.N_S
+    WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100 + 99
+      AND (   (H.NO_S = 2 AND D.TAG = 13 AND D.BED > 0)
+           OR (H.NO_S = 4 AND D.TAG IN (4, 25) AND D.BES > 0)
+           -- سند افتتاحیه و اختتامیه هم «سند عمومی» (NO_S=0) هستند ولی بدهیِ این ماه نیستند:
+           -- افتتاحیه مانده‌ی سال قبل را می‌آورد و اختتامیه حساب‌ها را می‌بندد.
+           OR (H.NO_S = 0 AND D.BED > 0
+               AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%''))
+
+    UNION ALL
+    -- سند خزانه از خودِ ردیف خزانه (PGET_LST: از حساب ← به حساب) خوانده می‌شود، نه از ردیف‌های
+    -- سند: هر ردیف خزانه یک قلم است، پس واریز بانکیِ هم‌مبلغِ همان شخص در همان خزانه با ردیف
+    -- هزینه جفت نمی‌شود. شرحِ سند هم مبنا نیست چون WPF واحد را به آن می‌چسباند («- اداري»).
+    -- «هزینه» یعنی گروه حساب کل در جدول حساب‌ها (TOTA_HES.GROUP = 71، «هزینه ها» در
+    -- TCOD_HESGROUP)، نه بازه‌ی شماره‌ی حساب.
+    SELECT Acc.EMP_ID, H.N_S, H.NO_S, NULL, PH.ID, H.DATE_S,
+           N''سند خزانه '' + CAST(PH.ID AS NVARCHAR(20)) + N'': '' + LEFT(LTRIM(ISNULL(PL.SHARH, N'''')), 120),
+           PL.MABL
+    FROM Acc
+    JOIN dbo.PGET_LST PL ON PL.THES_K = Acc.K AND PL.THES_M = Acc.M
+                        AND ISNULL(PL.THES_T, 0)  = Acc.T  AND ISNULL(PL.THES_T2, 0) = Acc.T2
+                        AND ISNULL(PL.THES_T3, 0) = Acc.T3 AND ISNULL(PL.THES_T4, 0) = Acc.T4
+    JOIN dbo.PGET_HED PH ON PH.ID = PL.ID
+    JOIN dbo.DEED_HED H ON H.N_S = PH.N_S AND H.NO_S = 5
+    JOIN dbo.TOTA_HES K ON K.NUMBER = PL.FHES_K AND K.[GROUP] = 71
+    WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100 + 99
+      AND PL.MABL > 0
 )
-SELECT Acc.EMP_ID, D.N_S, H.NO_S, D.TAG, D.NUMBER, H.DATE_S,
-       -- شماره‌ی فاکتور پایدار است؛ شماره‌ی سند (N_S) نه — نرم‌افزار WPF آن را از نو شماره
-       -- می‌زند. پس ردیفِ سند دستی با شرح و تاریخش شناخته می‌شود، نه با شماره.
-       TITLE = CAST(
-           CASE WHEN H.NO_S = 2 THEN N''فاکتور فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
-                WHEN H.NO_S = 4 THEN N''برگشت از فروش '' + CAST(CAST(D.NUMBER AS BIGINT) AS NVARCHAR(20))
-                WHEN H.NO_S = 5 THEN N''سند خزانه: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120)
-                ELSE N''سند دستی: '' + LEFT(LTRIM(ISNULL(D.SHARH, N'''')), 120)
-           END
-           + N'' — '' + CAST(H.DATE_S / 10000 AS NVARCHAR(4)) + N''/'' + RIGHT(N''0'' + CAST(H.DATE_S / 100 % 100 AS NVARCHAR(2)), 2)
-           + N''/'' + RIGHT(N''0'' + CAST(H.DATE_S % 100 AS NVARCHAR(2)), 2) AS NVARCHAR(300)),
-       AMOUNT = CAST(CASE WHEN H.NO_S = 4 THEN -D.BES ELSE D.BED END AS BIGINT)
-FROM Acc
-JOIN dbo.DEED_DTL D ON D.HES_K = Acc.K AND D.HES_M = Acc.M
-                   AND ISNULL(D.HES_T, 0)  = Acc.T  AND ISNULL(D.HES_T2, 0) = Acc.T2
-                   AND ISNULL(D.HES_T3, 0) = Acc.T3 AND ISNULL(D.HES_T4, 0) = Acc.T4
-JOIN dbo.DEED_HED H ON H.N_S = D.N_S
-WHERE H.DATE_S BETWEEN (@PERIOD_DATE / 100) * 100 AND (@PERIOD_DATE / 100) * 100 + 99
-  AND (   (H.NO_S = 2 AND D.TAG = 13 AND D.BED > 0)
-       OR (H.NO_S = 4 AND D.TAG IN (4, 25) AND D.BES > 0)
-       -- سند افتتاحیه و اختتامیه هم «سند عمومی» (NO_S=0) هستند ولی بدهیِ این ماه نیستند:
-       -- افتتاحیه مانده‌ی سال قبل را می‌آورد و اختتامیه حساب‌ها را می‌بندد.
-       OR (H.NO_S = 0 AND D.BED > 0
-           AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%افتتاح%'' AND ISNULL(H.SHARH_S, N'''') NOT LIKE N''%اختتام%'')
-       -- طرف مقابل از خودِ ردیف خزانه (PGET_LST: از حساب ← به حساب) خوانده می‌شود، نه از
-       -- ردیف‌های سند: یک سند خزانه ردیف‌های زیادی برای پرسنل مختلف دارد و مبلغ/شرحِ یکسان
-       -- می‌توانست واریز بانکیِ یک نفر را به هزینه‌ی نفر دیگر جفت کند.
-       OR (H.NO_S = 5 AND D.BED > 0
-           AND EXISTS (SELECT 1 FROM dbo.PGET_HED PH JOIN dbo.PGET_LST PL ON PL.ID = PH.ID
-                       WHERE PH.N_S = D.N_S AND PL.FHES_K BETWEEN 700 AND 799 AND PL.MABL = D.BED
-                         AND PL.THES_K = D.HES_K AND PL.THES_M = D.HES_M
-                         AND ISNULL(PL.THES_T, 0)  = ISNULL(D.HES_T, 0)  AND ISNULL(PL.THES_T2, 0) = ISNULL(D.HES_T2, 0)
-                         AND ISNULL(PL.THES_T3, 0) = ISNULL(D.HES_T3, 0) AND ISNULL(PL.THES_T4, 0) = ISNULL(D.HES_T4, 0))));
+SELECT EMP_ID, N_S, NO_S, TAG, NUMBER, DATE_S,
+       TITLE = CAST(LABEL
+           + N'' — '' + CAST(DATE_S / 10000 AS NVARCHAR(4)) + N''/'' + RIGHT(N''0'' + CAST(DATE_S / 100 % 100 AS NVARCHAR(2)), 2)
+           + N''/'' + RIGHT(N''0'' + CAST(DATE_S % 100 AS NVARCHAR(2)), 2) AS NVARCHAR(300)),
+       AMOUNT = CAST(AMOUNT AS BIGINT)
+FROM Items;
 ');
 GO
 
@@ -1873,8 +1889,9 @@ GO
 UPDATE dbo.PAY2_CONFIG
 SET CFG_OPTIONS = N'CURRENT_MONTH|OPEN_BALANCE|ACCOUNT_ITEMS',
     OPT_LABELS  = N'فقط ماه جاری|کل مانده باز|فاکتور فروش و سند دستیِ ماه',
-    DESC_FA     = N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش و سند دستیِ همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (پرداخت‌های خزانه و سند حقوق کسر نمی‌شوند)'
-WHERE CFG_KEY = N'ADV_SCOPE' AND ISNULL(CFG_OPTIONS, N'') NOT LIKE N'%ACCOUNT_ITEMS%';
+    DESC_FA     = N'CURRENT_MONTH=فقط اسناد همان ماه | OPEN_BALANCE=کل مانده باز تا سند حقوق | ACCOUNT_ITEMS=فقط فاکتور فروش، سند دستی و سند خزانه‌ای که طرف مقابلش حساب هزینه (۷xx) است، همان ماه روی حساب شخص پرسنل، ردیف‌به‌ردیف در فیش (واریز و انتقال‌های خزانه و سند حقوق کسر نمی‌شوند)'
+WHERE CFG_KEY = N'ADV_SCOPE' AND (ISNULL(CFG_OPTIONS, N'') NOT LIKE N'%ACCOUNT_ITEMS%'
+                                 OR DESC_FA LIKE N'%پرداخت‌های خزانه و سند حقوق کسر نمی‌شوند%');
 GO
 ");
 
@@ -2553,12 +2570,13 @@ BEGIN
         FROM #EmployeeSource E
         WHERE E.EMP_ID=@EMP_ID;
 
-        INSERT INTO PAY2_RUN_DETAIL (RUN_ID, EMP_ID, ITEM_ID, AMOUNT, NOMINAL_AMOUNT, ITEM_CODE_SNAP, ITEM_NAME_SNAP, CALC_BASIS_SNAP, ITEM_TYPE_SNAP, INS_SUBJECT_AMOUNT, TAX_SUBJECT_AMOUNT, INS_SUBJECT, TAX_SUBJECT)
+        INSERT INTO PAY2_RUN_DETAIL (RUN_ID, EMP_ID, ITEM_ID, AMOUNT, NOMINAL_AMOUNT, ITEM_CODE_SNAP, ITEM_NAME_SNAP, CALC_BASIS_SNAP, ITEM_TYPE_SNAP, INS_SUBJECT_AMOUNT, TAX_SUBJECT_AMOUNT, INS_SUBJECT, TAX_SUBJECT, PAY_BASE_DAYS_SNAP)
         SELECT @NEW_RUN_ID, @EMP_ID, C.ITEM_ID, SUM(C.AMOUNT), SUM(C.INS_AMOUNT), MAX(C.ITEM_CODE), MAX(I.ITEM_NAME), MAX(I.CALC_BASIS), MAX(C.ITEM_TYPE),
                SUM(CASE WHEN C.ITEM_CODE<>'BASE_SAL_B' AND C.INS_SUBJECT=1 THEN C.INS_AMOUNT ELSE 0 END),
                SUM(CASE WHEN C.ITEM_CODE<>'BASE_SAL_B' AND C.TAX_SUBJECT=1 THEN C.INS_AMOUNT ELSE 0 END),
                CASE WHEN SUM(CASE WHEN C.ITEM_CODE<>'BASE_SAL_B' AND C.INS_SUBJECT=1 THEN C.INS_AMOUNT ELSE 0 END)<>0 THEN 1 ELSE 0 END,
-               CASE WHEN SUM(CASE WHEN C.ITEM_CODE<>'BASE_SAL_B' AND C.TAX_SUBJECT=1 THEN C.INS_AMOUNT ELSE 0 END)<>0 THEN 1 ELSE 0 END
+               CASE WHEN SUM(CASE WHEN C.ITEM_CODE<>'BASE_SAL_B' AND C.TAX_SUBJECT=1 THEN C.INS_AMOUNT ELSE 0 END)<>0 THEN 1 ELSE 0 END,
+               MAX(I.PAY_BASE_DAYS)
         FROM @ItemCalc C INNER JOIN #ItemDefSource I ON I.ITEM_ID=C.ITEM_ID
         GROUP BY C.ITEM_ID
         HAVING SUM(C.AMOUNT) <> 0 OR SUM(C.INS_AMOUNT) <> 0 OR MAX(C.ITEM_CODE) IN ('BASE_SAL','BASE_SAL_B','SANOVAT_PAYE');
@@ -3925,8 +3943,9 @@ BEGIN
         SELECT CAST(@ACC_SALARY_PAY AS NVARCHAR(100)), CAST(N'حقوق پرداختنی ' + @ML AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(SUM(CASE WHEN NET_PAY > 0 THEN NET_PAY ELSE 0 END) AS BIGINT), CAST('SALARY_PAYABLE' AS NVARCHAR(50)), CAST(NULL AS INT), CAST(NULL AS NVARCHAR(150)), 6
         FROM #SalarySplit HAVING SUM(CASE WHEN NET_PAY > 0 THEN NET_PAY ELSE 0 END) > 0
         UNION ALL
-        -- بدهی پرسنل فقط از خالص منفی می‌آید؛ سهم کارفرما در ردیف INS_EXP ثبت شده است.
-        SELECT CAST(@ACC_SALARY_PAY AS NVARCHAR(100)), CAST(N'بدهی بیمه و مالیات پرسنل ' + @ML AS NVARCHAR(500)), CAST(SUM(PERSONAL_DEBT) AS BIGINT), CAST(0 AS BIGINT), CAST('SALARY_PAYABLE' AS NVARCHAR(50)), CAST(NULL AS INT), CAST(NULL AS NVARCHAR(150)), 6
+        -- بدهی پرسنل فقط از خالص منفی می‌آید؛ سهم کارفرما در ردیف INS_EXP ثبت شده است. شرح عمومی است
+        -- چون این بدهی جز بیمه و مالیات می‌تواند از کسر فاکتور و سند حساب شخص (فقط‌بیمه‌ها) هم باشد.
+        SELECT CAST(@ACC_SALARY_PAY AS NVARCHAR(100)), CAST(N'بدهی پرسنل (خالص منفی) ' + @ML AS NVARCHAR(500)), CAST(SUM(PERSONAL_DEBT) AS BIGINT), CAST(0 AS BIGINT), CAST('SALARY_PAYABLE' AS NVARCHAR(50)), CAST(NULL AS INT), CAST(NULL AS NVARCHAR(150)), 6
         FROM #SalarySplit HAVING SUM(PERSONAL_DEBT) > 0
         UNION ALL
         SELECT CAST(@ACC_INS_PAYABLE AS NVARCHAR(100)), CAST(N'بیمه تأمین اجتماعی ' + @ML AS NVARCHAR(500)), CAST(0 AS BIGINT), CAST(SUM(INS_WORKER + INS_EMPLOYER) AS BIGINT), CAST('INS_PAYABLE' AS NVARCHAR(50)), CAST(NULL AS INT), CAST(NULL AS NVARCHAR(150)), 7
@@ -4065,10 +4084,12 @@ BEGIN
         SELECT D.EMP_ID, D.ITEM_ID,
                -- مثل سند قدیمی، تعداد روزِ کارکرد کنار حقوق روزانه می‌آید (مثلاً ۲۴ روز
                -- برای کسی که کل ماه را کار نکرده). همان روزی که موتور با آن حساب کرده:
-               -- PAY_BASE_DAYS قلم، ۱ = DAYS (در NOMINAL_DAYS) و ۲ = DAYSB (در WORK_DAYS).
+               -- PAY_BASE_DAYS قلم، ۱ = DAYS (در NOMINAL_DAYS) و ۲ = DAYSB (در WORK_DAYS). از نسخه‌ی
+               -- ثبت‌شده هنگام محاسبه خوانده می‌شود، چون تنظیمِ قلم بعداً قابل تغییر است؛ اجرای قدیمی
+               -- که این ستون را ندارد تنظیمِ فعلی را می‌گیرد.
                ISNULL(ISNULL(D.ITEM_NAME_SNAP, I.ITEM_NAME), N'قلم حکم')
                + CASE WHEN ISNULL(D.ITEM_CODE_SNAP, I.ITEM_CODE) IN ('BASE_SAL_B', 'BASE_SAL')
-                      THEN ISNULL(N' (' + FORMAT(CASE WHEN I.PAY_BASE_DAYS = 1 THEN RL.NOMINAL_DAYS ELSE RL.WORK_DAYS END, '0.##')
+                      THEN ISNULL(N' (' + FORMAT(CASE WHEN ISNULL(D.PAY_BASE_DAYS_SNAP, I.PAY_BASE_DAYS) = 1 THEN RL.NOMINAL_DAYS ELSE RL.WORK_DAYS END, '0.##', 'en-US')
                                   + N' روز کارکرد)', N'')
                       ELSE N'' END,
                ISNULL(I.EXP_TAFSILI, 9),

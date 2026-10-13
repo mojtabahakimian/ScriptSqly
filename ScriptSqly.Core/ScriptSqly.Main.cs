@@ -83,6 +83,13 @@ namespace ScriptSqly.Migrations
                         try { ExecuteMigration(db, $@"IF COL_LENGTH('dbo.{ARZKIND2_TABLE}', 'ARZKIND2') IS NULL ALTER TABLE [dbo].[{ARZKIND2_TABLE}] ADD [ARZKIND2] [bigint] NULL"); } catch { }
                     }
 
+                    //ویوهای «SELECT جدول.*» (مثل pish_view) ستون‌هایی را که بعد از ساختشان به جدول اضافه شده نمی‌شناسند؛
+                    //در DENAF_YAZD1405 فرم پیش‌فاکتور با «Invalid column name CRT/UID» باز نمی‌شد. نوسازی متادیتا بی‌خطر و تکرارپذیر است
+                    foreach (var STAR_VIEW in new[] { "pish_view" })
+                    {
+                        try { ExecuteMigration(db, $@"IF OBJECT_ID(N'dbo.{STAR_VIEW}', N'V') IS NOT NULL EXEC sp_refreshview N'dbo.{STAR_VIEW}'"); } catch { }
+                    }
+
                     SequentialKeyContentionScript(db);
                     DeedDtlBalanceCoveringIndex(db);
 

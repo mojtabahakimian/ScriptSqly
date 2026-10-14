@@ -4352,6 +4352,34 @@ BEGIN
             RAISERROR(@ErrRec, 16, 1);
             RETURN;
         END
+
+        -- خرید/سند حساب شخص قبلاً در دفتر بدهکار شده و از خالص فیش هم کسر شده است.
+        -- جفتِ بدهکار/بستانکارِ زیر روی همان حساب فقط گردش اضافی می‌سازد. بعد از گارد
+        -- خالص، فقط جفتِ یکتای هم‌پرسنل/هم‌حساب/هم‌مبلغ حذف می‌شود؛ مساعده و انتقال
+        -- بین حساب‌های متفاوت یا کسورات دیگر همچنان در سند می‌مانند.
+        -- HES_CODE با collation دیتابیس است و ACC_T با collation ِ tempdb؛ در نصبی که این دو
+        -- فرق دارند، مقایسه بدون COLLATE صریح با خطای 468 کل صدور سند را متوقف می‌کرد.
+        DECLARE @NeutralAccountDeductions TABLE (EMP_ID INT PRIMARY KEY);
+        INSERT INTO @NeutralAccountDeductions (EMP_ID)
+        SELECT SS.EMP_ID
+        FROM #SalarySplit SS
+        WHERE SS.ADV_ITEMS = 1 AND SS.ADVANCE_DED > 0 AND SS.ADV_ACC = SS.ACC_T
+          AND (SELECT COUNT(*) FROM #FinalArticles D
+               WHERE D.EMP_ID = SS.EMP_ID AND D.HES_CODE = SS.ACC_T COLLATE database_default
+                 AND D.ACC_KEY = 'EMP_DED' AND D.BED = SS.ADVANCE_DED AND D.BES = 0
+                 AND D.SHARH = N'کسر فاکتور و سند حساب ' + @ML + N' | ' + SS.FULL_NAME) = 1
+          AND (SELECT COUNT(*) FROM #FinalArticles C
+               WHERE C.EMP_ID = SS.EMP_ID AND C.HES_CODE = SS.ACC_T COLLATE database_default
+                 AND C.ACC_KEY = 'ADVANCE_SETTLE' AND C.BES = SS.ADVANCE_DED AND C.BED = 0) = 1;
+
+        DELETE FA
+        FROM #FinalArticles FA
+        INNER JOIN @NeutralAccountDeductions N ON N.EMP_ID = FA.EMP_ID
+        INNER JOIN #SalarySplit SS ON SS.EMP_ID = N.EMP_ID
+        WHERE FA.HES_CODE = SS.ACC_T COLLATE database_default
+          AND ((FA.ACC_KEY = 'EMP_DED' AND FA.BED = SS.ADVANCE_DED AND FA.BES = 0
+                AND FA.SHARH = N'کسر فاکتور و سند حساب ' + @ML + N' | ' + SS.FULL_NAME)
+            OR (FA.ACC_KEY = 'ADVANCE_SETTLE' AND FA.BES = SS.ADVANCE_DED AND FA.BED = 0));
     END
 
     -- ─────────────────────────────────────────────────────────────────

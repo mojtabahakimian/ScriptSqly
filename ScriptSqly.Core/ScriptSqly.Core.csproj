@@ -12,6 +12,8 @@
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.SqlServer.Server" Version="1.0.0" />
+    <!-- Microsoft.Data.SqlClient نسخه‌ی آسیب‌پذیر 8.0.1 را می‌آورد؛ 8.0.2 همان شاخه با وصله‌ی امنیتی است. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.2" />
   </ItemGroup>
 
 </Project>

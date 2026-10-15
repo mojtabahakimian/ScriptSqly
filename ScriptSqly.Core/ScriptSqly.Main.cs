@@ -3371,6 +3371,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     SignedPorsantPermissionScript(db);
                     PulsePermissionScript(db);
                     AccAuditScript(db); //رئیس حسابداری مجازی در Safir
+                    AccAgentScript(db); //ایجنت رئیس حسابداری مجازی در Safir (پیش‌فرض خاموش)
                 }
 
                 //1405/03/05

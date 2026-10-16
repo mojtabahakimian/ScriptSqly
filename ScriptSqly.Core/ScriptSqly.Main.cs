@@ -3373,6 +3373,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AccAuditScript(db); //رئیس حسابداری مجازی در Safir
                     AccAgentScript(db); //ایجنت رئیس حسابداری مجازی در Safir (پیش‌فرض خاموش)
                     AccAgentPeopleScript(db); //ایجنت: پرونده‌ی کاربران و یادگیری از بازخورد
+                    AccAgentInvestigateScript(db); //ایجنت: تحلیلِ علتِ یافته‌های کنترل‌های ثابت
                 }
 
                 //1405/03/05

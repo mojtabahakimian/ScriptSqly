@@ -13,6 +13,7 @@ namespace ScriptSqly.Migrations
         private static void DashboardScript(SqlConnection db)
         {
             ExecuteBatches(db, DashboardSql);
+            ExecuteBatches(db, DashboardPublishSql);
         }
 
         private const string DashboardSql = @"/* ═══════════════════════════════════════════════════════════════════
@@ -54,6 +55,62 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_DSH_Board_User' AND o
 GO
 
 PRINT N'«داشبورد من»: جدولِ DSH_Board آماده شد.';
+GO
+";
+
+        /// <summary>
+        /// دسترسیِ انتشارِ قالبِ داشبورد (DSH_PUBLISH). مو‌به‌مو با Server/Database/50-dashboard-publish.sql
+        /// در مخزنِ Safir (آزمونِ DashboardTests همین را می‌سنجد).
+        /// </summary>
+        private const string DashboardPublishSql = @"/* ═══════════════════════════════════════════════════════════════════
+   «داشبورد من» — دسترسیِ انتشارِ قالب برای همه (FORMNAME = DSH_PUBLISH)
+
+   کاربری که RUN ِ این فرم را دارد می‌تواند یکی از داشبوردهای خودش را به‌عنوانِ «قالبِ سازمان»
+   منتشر کند یا قالبِ منتشرشده را بردارد. قالب‌ها در همان DSH_Board با UserCo = 0 ذخیره می‌شوند
+   (جدولِ تازه لازم نیست). پیش‌فرض برای همه بسته است؛ از فرمِ تعیینِ سطحِ دسترسیِ نرم‌افزارِ ویندوزی
+   (با جستجوی «داشبورد») داده می‌شود. idempotent است.
+   ═══════════════════════════════════════════════════════════════════ */
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+SET XACT_ABORT ON;
+GO
+
+/* ── ۱) تعریفِ فرم در TFORMS، در همان گروهِ «نبض سازمان» ── */
+IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM [dbo].[TFORMS] WHERE FORMNAME = N'DSH_PUBLISH')
+BEGIN
+    INSERT INTO [dbo].[TFORMS] (FORMNAME, CAPTION, kind, GRP, IDH, CRT)
+    VALUES (N'DSH_PUBLISH',
+            N'انتشار قالب داشبورد برای همه',
+            3,
+            ISNULL((SELECT TOP 1 GRP FROM [dbo].[TFORMS] WHERE FORMNAME = N'PULSE'), 2),
+            (SELECT ISNULL(MAX(IDH), 0) + 1 FROM [dbo].[TFORMS]),
+            GETDATE());
+END
+GO
+
+/* ── ۲) ردیفِ دسترسیِ بسته برای همه‌ی کاربران تا در فرمِ سطحِ دسترسی دیده و باز شود ── */
+IF OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
+   AND OBJECT_ID(N'[dbo].[SAL_CHEK]', N'U') IS NOT NULL
+   AND OBJECT_ID(N'[dbo].[SALA_DTL]', N'U') IS NOT NULL
+BEGIN
+    DECLARE @PublishId INT = (SELECT IDH FROM [dbo].[TFORMS] WHERE FORMNAME = N'DSH_PUBLISH');
+
+    IF @PublishId IS NOT NULL
+        INSERT INTO [dbo].[SAL_CHEK] (USERCO, [OBJECT], RUN, SEE, INP, UPD, DEL, CRT)
+        SELECT D.IDD, @PublishId, 0, 0, 0, 0, 0, GETDATE()
+        FROM [dbo].[SALA_DTL] D
+        WHERE NOT EXISTS (
+            SELECT 1 FROM [dbo].[SAL_CHEK] E
+            WHERE E.USERCO = D.IDD AND E.[OBJECT] = @PublishId
+        );
+END
+GO
+
+PRINT N'«داشبورد من»: دسترسیِ DSH_PUBLISH آماده شد.';
 GO
 ";
     }

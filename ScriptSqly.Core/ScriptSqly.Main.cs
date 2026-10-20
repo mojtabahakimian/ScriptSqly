@@ -3376,6 +3376,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AccAgentInvestigateScript(db); //ایجنت: تحلیلِ علتِ یافته‌های کنترل‌های ثابت
                     DashboardScript(db); //«داشبورد من» در Safir
                     FiscalYearsFormScript(db); //«سال‌های مالی» در Safir: فرمِ جدای دسترسی
+                    MessageReactionsScript(db); //پیام‌های اتوماسیون در Safir: واکنش (شکلک)
                 }
 
                 //1405/03/05

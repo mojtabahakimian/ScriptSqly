@@ -404,6 +404,21 @@ ALTER TABLE [dbo].[TR_PAY_GETD] ADD CONSTRAINT [PK__TR_PAY_G__9FFE4EA46E02EDDB] 
 
                     try { ExecuteMigration(db, $@"ALTER TABLE dbo.PAY_GETP ADD ID BIGINT IDENTITY(1,1) NOT NULL"); } catch { }
 
+                    // وضعیت ثبت/تأیید صیادی چک‌ها؛ مستقل از شمارهٔ صیادی (SAYADI) و از گردش مالی.
+                    // NULL = نامشخص، 0 = انجام نشده، 1 = انجام شده
+                    try
+                    {
+                        ExecuteMigration(db, @"
+IF COL_LENGTH('dbo.PAY_GETD','SAYADI_STATUS') IS NULL ALTER TABLE dbo.PAY_GETD ADD SAYADI_STATUS tinyint NULL;
+IF COL_LENGTH('dbo.PAY_GETD','SAYADI_STATUS_DATE') IS NULL ALTER TABLE dbo.PAY_GETD ADD SAYADI_STATUS_DATE bigint NULL;
+IF COL_LENGTH('dbo.PAY_GETD','SAYADI_STATUS_UID') IS NULL ALTER TABLE dbo.PAY_GETD ADD SAYADI_STATUS_UID int NULL;
+IF COL_LENGTH('dbo.PAY_GETP','SAYADI_STATUS') IS NULL ALTER TABLE dbo.PAY_GETP ADD SAYADI_STATUS tinyint NULL;
+IF COL_LENGTH('dbo.PAY_GETP','SAYADI_STATUS_DATE') IS NULL ALTER TABLE dbo.PAY_GETP ADD SAYADI_STATUS_DATE bigint NULL;
+IF COL_LENGTH('dbo.PAY_GETP','SAYADI_STATUS_UID') IS NULL ALTER TABLE dbo.PAY_GETP ADD SAYADI_STATUS_UID int NULL;
+");
+                    }
+                    catch { }
+
                     try { ExecuteMigration(db, $@"ALTER VIEW ANBARGRD_SUB2 AS  SELECT  dbo.ANBGRD_LST.MOG - dbo.ANBGRD_LST.NUM2 AS EKH, dbo.ANBGRD_LST.GRD_NUM, dbo.ANBGRD_LST.CODE, dbo.STUF_DEF.NAME AS nam, dbo.ANBGRD_LST.MOG, dbo.ANBGRD_LST.NUM1, dbo.ANBGRD_LST.NUM2, 
                          dbo.ANBGRD_LST.NUM3, dbo.ANBGRD_LST.MABL, dbo.TCOD_VAHEDS.NAMES, dbo.STUF_DEF.N_FANI, dbo.TCOD_STUFGROUP.NAMES AS grp
 					     FROM            dbo.ANBGRD_LST INNER JOIN

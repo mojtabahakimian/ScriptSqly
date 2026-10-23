@@ -146,14 +146,17 @@ END
 GO
 
 /* ── ۲) کلید فعال‌سازی، هم‌خانواده‌ی ACL_ENFORCE حقوق و دستمزد ─────────
-   اگر PAY2_CONFIG نباشد، بلوک رد می‌شود و سرور کلید را «خاموش» می‌خواند. */
+   اگر PAY2_CONFIG نباشد، بلوک رد می‌شود و سرور کلید را «خاموش» می‌خواند.
+   CRT عمداً نوشته نمی‌شود: PAY2_CONFIG ِ خودِ SalaryScript این ستون را ندارد
+   (روی Arman1405 با «Invalid column name 'CRT'» می‌شکست)؛ هرجا هست،
+   پیش‌فرضِ getdate() همان مقدار را می‌گذارد. */
 IF OBJECT_ID(N'dbo.PAY2_CONFIG', N'U') IS NOT NULL
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM dbo.PAY2_CONFIG WHERE CFG_KEY = N'CRM_ACL_ENFORCE')
     BEGIN
         INSERT INTO dbo.PAY2_CONFIG
             (CFG_KEY, CFG_VALUE, CFG_OPTIONS, CFG_DEFAULT, CFG_SECTION,
-             LABEL_FA, DESC_FA, OPT_LABELS, DATA_TYPE, ACCESS_LEVEL, CRT)
+             LABEL_FA, DESC_FA, OPT_LABELS, DATA_TYPE, ACCESS_LEVEL)
         VALUES
             (N'CRM_ACL_ENFORCE',
              N'0',
@@ -166,8 +169,7 @@ BEGIN
              N'می‌بیند، مگر مجوز فرم CRMALL («مشاهده CRM همه کاربران») را داشته باشد.',
              N'روشن — هر کاربر فقط داده‌ی خودش|خاموش — همه همه‌چیز را می‌بینند',
              N'BOOL',
-             1,
-             GETDATE());
+             1);
     END
 END
 GO

@@ -102,5 +102,32 @@ namespace ScriptSqly.Migrations
                       END
                   END");
         }
+
+        /// <summary>
+        /// سطرِ SAL_CHEK ِ هر کاربر برای هر فرم — تا همه‌ی فرم‌ها در «تعیین سطح دسترسی» ِ WPF دیده شوند.
+        ///
+        /// آن پنجره (F_USER_PERMITION_FORMS) فهرست را از TFORMS INNER JOIN SAL_CHEK می‌سازد و خودش فقط برای
+        /// کاربری که هیچ سطری ندارد همه را می‌سازد؛ پس فرمی که بعداً به TFORMS اضافه می‌شود (PAY2_*، COST_*، …)
+        /// برای کاربرانِ قدیمی هرگز در آن نمی‌آید، هر چند بار هم به‌روزرسانی اجرا شود (Arman1405: ۵۱ فرم برای ۲۱
+        /// کاربر از ۲۲). سطرِ نبوده با همه‌ی مجوزها صفر ساخته می‌شود — صریح، چون پیش‌فرضِ ستون‌های SAL_CHEK یک
+        /// است — پس دسترسیِ کسی عوض نمی‌شود: نبودِ سطر هم در هر دو برنامه «اجازه ندارد» است.
+        /// در هر اجرا، بعد از همه‌ی اسکریپت‌هایی که فرم می‌سازند. مو‌به‌مو برابر با Server/Database/sal_chek_complete_rows.sql ِ Safir.
+        /// </summary>
+        private static void CompleteFormPermissionRowsScript(SqlConnection db)
+        {
+            ExecuteMigration(db,
+                @"IF OBJECT_ID(N'[dbo].[SAL_CHEK]', N'U') IS NOT NULL
+                     AND OBJECT_ID(N'[dbo].[TFORMS]', N'U') IS NOT NULL
+                     AND OBJECT_ID(N'[dbo].[SALA_DTL]', N'U') IS NOT NULL
+                  INSERT INTO [dbo].[SAL_CHEK] (USERCO, [OBJECT], RUN, SEE, INP, UPD, DEL, CRT)
+                  SELECT D.IDD, F.IDH, 0, 0, 0, 0, 0, GETDATE()
+                  FROM [dbo].[SALA_DTL] D
+                  CROSS JOIN [dbo].[TFORMS] F
+                  WHERE D.IDD IS NOT NULL AND F.IDH IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM [dbo].[SAL_CHEK] E
+                        WHERE E.USERCO = D.IDD AND E.[OBJECT] = F.IDH
+                    );");
+        }
     }
 }

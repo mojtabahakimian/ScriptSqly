@@ -4430,6 +4430,17 @@ LEFT OUTER JOIN dbo.CUST_HESAB ON dbo.CUST_HESAB.hes = dbo.Visit_route.HES;
                     }
                     catch (Exception) { }
                 }
+
+                // آخرین قدم و بیرون از isCustomCall: هر فرمی که بالاتر (یا در اجرای حقوق) ساخته شد، برای همه‌ی
+                // کاربران در «تعیین سطح دسترسی» ِ WPF دیده شود. یک INSERT ... NOT EXISTS است و تکرارش بی‌خطر.
+                try
+                {
+                    CompleteFormPermissionRowsScript(db);
+                }
+                catch (Exception ex)
+                {
+                    LogNonBlockingMigrationFailure(nameof(CompleteFormPermissionRowsScript), db.Database, ex);
+                }
             }
         }
 

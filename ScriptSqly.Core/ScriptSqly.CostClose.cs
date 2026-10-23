@@ -2122,12 +2122,26 @@ GO
    می‌شود. کاربر قرار نیست بابت داده‌ای که اصلاً به او تحویل داده نشده
    پیام بگیرد.
 
+   ── وقتی خودِ ستون نیست ──
+   روی Arman1405 جدولِ TAGCOD اصلاً ستونِ tartib نداشت. آن‌وقت همین
+   اسکریپت هم با «Invalid column name 'tartib'» می‌شکست — شرطِ
+   COL_LENGTH جلوی خطای کامپایلِ دسته را نمی‌گیرد — و رویه‌های CC_
+   بعدی هم که t.tartib را می‌خوانند ساخته نمی‌شدند. پس ستون در دسته‌ی
+   جدا ساخته می‌شود و بعد مثل NULL پر می‌شود؛ همان کاری که مهاجرتِ
+   دنافراز هم می‌کند. WPF (AUTO_BAZ) بدون ستون همین اعداد را با CASE
+   می‌سازد؛ فقط برگه‌هایی که آن CASE نمی‌شناسد (مثل ۰، اول دوره) به‌جای
+   ۲۵ همان جایی می‌نشینند که در پایگاه‌های سالم می‌نشینند.
+
    نکته: عمداً هیچ «USE <database>» اینجا نیست.
    ═══════════════════════════════════════════════════════════════════ */
 
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
+GO
+
+IF OBJECT_ID('dbo.TAGCOD', 'U') IS NOT NULL AND COL_LENGTH('dbo.TAGCOD', 'tartib') IS NULL
+    ALTER TABLE dbo.TAGCOD ADD tartib INT NULL;
 GO
 
 IF COL_LENGTH('dbo.TAGCOD', 'tartib') IS NOT NULL

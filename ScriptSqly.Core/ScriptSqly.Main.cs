@@ -3395,6 +3395,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AccAgentAccountAckScript(db); //ایجنت: «درست است» روی مانده‌های برخلافِ همیشه
                     OversightFormsScript(db); //Safir: دیدنِ پیام، گفتگوی دستیار و داشبوردِ کاربرانِ دیگر (MSGALL/AIALL/DSHALL)
                     ExportSalesAccountScript(db); //Safir: حسابِ خودگردانِ «فروش صادرات» (SAZMAN.SFROSH)
+                    AutoAccountsModernScript(db); //حساب‌های خودگردانِ مدرن (SAZMAN.AUTO_MODERN + AUTO_HES)؛ Safir و MrCorrect
                 }
 
                 //1405/03/05

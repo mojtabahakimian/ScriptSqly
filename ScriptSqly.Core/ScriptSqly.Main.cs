@@ -3394,6 +3394,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     MessageReactionsScript(db); //پیام‌های اتوماسیون در Safir: واکنش (شکلک)
                     AccAgentAccountAckScript(db); //ایجنت: «درست است» روی مانده‌های برخلافِ همیشه
                     OversightFormsScript(db); //Safir: دیدنِ پیام، گفتگوی دستیار و داشبوردِ کاربرانِ دیگر (MSGALL/AIALL/DSHALL)
+                    ExportSalesAccountScript(db); //Safir: حسابِ خودگردانِ «فروش صادرات» (SAZMAN.SFROSH)
                 }
 
                 //1405/03/05

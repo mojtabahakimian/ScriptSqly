@@ -74,6 +74,8 @@ namespace ScriptSqly.Migrations
 
                 if (isCustomCall)
                 {
+                    TechnicalCodeMapGroupsScript(db);
+                    SmsMessageTextScript(db);
                     AmvalArchiveScript(db);
                     try { ExecuteMigration(db, "ALTER TABLE dbo.OTHER_DTL ALTER COLUMN TOZIH NVARCHAR(1000) NULL"); } catch { } //اضافه کردن توضیحات بیشتر به Ctrl + G سایر اطلاعا حواله انبار فروش
 

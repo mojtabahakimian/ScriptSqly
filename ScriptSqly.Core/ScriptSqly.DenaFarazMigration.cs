@@ -763,7 +763,9 @@ GO
 
         public static void DenaFarazMigration(SqlConnection db)
         {
-            ExecuteBatches(db, DenaFarazMigrationSql);
+            // The atomic data step rewrites every invoice/voucher; Bandar exceeded the
+            // 30-second default under load. One-time conversion, so allow 30 minutes.
+            ExecuteBatches(db, DenaFarazMigrationSql, commandTimeout: 1800);
         }
     }
 }

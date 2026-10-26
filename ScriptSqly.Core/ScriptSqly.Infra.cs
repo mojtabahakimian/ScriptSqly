@@ -25,7 +25,7 @@ namespace ScriptSqly.Migrations
                 throw;
             }
         }
-        private static void ExecuteBatches(SqlConnection db, string script, SqlTransaction? transaction = null)
+        private static void ExecuteBatches(SqlConnection db, string script, SqlTransaction? transaction = null, int? commandTimeout = null)
         {
             // Safely split the script ONLY when "GO" is on its own line
             var commands = Regex.Split(script, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
@@ -37,7 +37,7 @@ namespace ScriptSqly.Migrations
                     try
                     {
                         string test = cmdText;
-                        ExecuteMigration(db, cmdText, transaction: transaction);
+                        ExecuteMigration(db, cmdText, transaction: transaction, commandTimeout: commandTimeout);
                     }
                     catch (SqlException ex)
                     {

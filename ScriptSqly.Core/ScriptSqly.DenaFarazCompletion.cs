@@ -2,6 +2,110 @@ namespace ScriptSqly.Migrations;
 
 public static partial class ScriptSqly
 {
+    // Read first, then run again with the exact approved code to clear it.
+    // No schema change; called only by the explicit WPF conversion workflow.
+    public const string DenaFarazCommissionAccountSql = @"
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+    IF (SELECT COUNT(*) FROM dbo.SAZMAN WITH (UPDLOCK,HOLDLOCK))<>1
+        THROW 51029,N'تنظیمات سازمان یکتا نیست؛ حساب پورسانت تغییر نکرد.',1;
+    DECLARE @Code nvarchar(100),@Invalid bit=0,@Cleared bit=0,@Reason nvarchar(300);
+    SELECT @Code=NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(100),HPOR))),N'') FROM dbo.SAZMAN;
+    IF @CLEAR_CONFIRMED=1 AND (@Code IS NULL OR @EXPECTED_CODE IS NULL OR @Code<>@EXPECTED_CODE)
+        THROW 51030,N'حساب پورسانت پس از پرسش تغییر کرده است؛ تبدیل را دوباره اجرا کنید.',1;
+    IF @Code IS NOT NULL AND @Code<>N'0'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CUST_HESAB WITH(HOLDLOCK) WHERE hes=@Code)
+        SET @Invalid=1;
+
+    IF @Invalid=1
+    BEGIN
+        -- Names are a fixed allowlist. Optional legacy history columns are
+        -- checked through metadata before a statement is compiled.
+        DECLARE @Checks TABLE (Id int IDENTITY,TableName sysname,C1 sysname NULL,C2 sysname NULL,
+            C3 sysname NULL,Mode int,Description nvarchar(300));
+        INSERT @Checks(TableName,C1,C2,C3,Mode,Description) VALUES
+        (N'VISITOR_DTL',NULL,NULL,NULL,0,N'اطلاعات پورسانت فاکتورها موجود است.'),
+        (N'TR_VISITOR_DTL',NULL,NULL,NULL,0,N'سابقهٔ پورسانت فاکتورها موجود است.'),
+        (N'VISITORS_PORSANT',NULL,NULL,NULL,0,N'الگوی پورسانت تعریف شده است.'),
+        (N'VISITORS_PORSANT_KALA',NULL,NULL,NULL,0,N'الگوی پورسانت کالا تعریف شده است.'),
+        (N'DEED_DTL',N'HES',NULL,NULL,1,N'این حساب در اسناد حسابداری مصرف شده است.'),
+        (N'TR_DEED_DTL',N'HES',NULL,NULL,1,N'این حساب در سابقهٔ اسناد حسابداری مصرف شده است.'),
+        (N'DEED_DTL',N'HES_K',N'HES_M',N'HES_T',2,N'اجزای این حساب در اسناد حسابداری مصرف شده است.'),
+        (N'TR_DEED_DTL',N'HES_K',N'HES_M',N'HES_T',2,N'اجزای این حساب در سابقهٔ اسناد مصرف شده است.'),
+        (N'PGET_LST',N'FHES',NULL,NULL,1,N'این حساب در خزانه مصرف شده است.'),
+        (N'PGET_LST',N'THES',NULL,NULL,1,N'این حساب در خزانه مصرف شده است.'),
+        (N'TR_PGET_LST',N'FHES',NULL,NULL,1,N'این حساب در سابقهٔ خزانه مصرف شده است.'),
+        (N'TR_PGET_LST',N'THES',NULL,NULL,1,N'این حساب در سابقهٔ خزانه مصرف شده است.'),
+        (N'PGET_LST',N'FHES_K',N'FHES_M',N'FHES_T',2,N'اجزای این حساب در خزانه مصرف شده است.'),
+        (N'PGET_LST',N'THES_K',N'THES_M',N'THES_T',2,N'اجزای این حساب در خزانه مصرف شده است.'),
+        (N'TR_PGET_LST',N'FHES_K',N'FHES_M',N'FHES_T',2,N'اجزای این حساب در سابقهٔ خزانه مصرف شده است.'),
+        (N'TR_PGET_LST',N'THES_K',N'THES_M',N'THES_T',2,N'اجزای این حساب در سابقهٔ خزانه مصرف شده است.'),
+        (N'DEED_DTL',N'SHARH',NULL,NULL,3,N'در شرح اسناد نشانهٔ پورسانت وجود دارد.'),
+        (N'TR_DEED_DTL',N'SHARH',NULL,NULL,3,N'در شرح سابقهٔ اسناد نشانهٔ پورسانت وجود دارد.'),
+        (N'DEED_HED',N'SHARH_S',NULL,NULL,3,N'در شرح سند نشانهٔ پورسانت وجود دارد.'),
+        (N'TR_DEED_HED',N'SHARH_S',NULL,NULL,3,N'در شرح سابقهٔ سند نشانهٔ پورسانت وجود دارد.'),
+        (N'PGET_LST',N'SHARH',NULL,NULL,3,N'در شرح خزانه نشانهٔ پورسانت وجود دارد.'),
+        (N'TR_PGET_LST',N'SHARH',NULL,NULL,3,N'در شرح سابقهٔ خزانه نشانهٔ پورسانت وجود دارد.'),
+        (N'HEAD_LST',N'MOLAH',NULL,NULL,4,N'در ملاحظات فاکتور نشانهٔ پورسانت وجود دارد.'),
+        (N'TR_HEAD_LST',N'MOLAH',NULL,NULL,4,N'در سابقهٔ ملاحظات فاکتور نشانهٔ پورسانت وجود دارد.'),
+        (N'INVO_LST',N'MANDAH',NULL,NULL,4,N'در توضیح ردیف کالا نشانهٔ پورسانت وجود دارد.'),
+        (N'TR_INVO_LST',N'MANDAH',NULL,NULL,4,N'در سابقهٔ ردیف کالا نشانهٔ پورسانت وجود دارد.'),
+        (N'INVO_LST',N'VISITOR',NULL,NULL,5,N'برای ردیف کالا ویزیتور تعیین شده است.'),
+        (N'TR_INVO_LST',N'VISITOR',NULL,NULL,5,N'در سابقهٔ ردیف کالا ویزیتور تعیین شده است.');
+        DECLARE @Id int=0,@Table sysname,@C1 sysname,@C2 sysname,@C3 sysname,@Mode int,
+            @Description nvarchar(300),@Value nvarchar(max),@Predicate nvarchar(max),@Sql nvarchar(max),@Found bit;
+        WHILE @Reason IS NULL
+        BEGIN
+            SELECT @Id=MIN(Id) FROM @Checks WHERE Id>@Id;
+            IF @Id IS NULL BREAK;
+            SELECT @Table=TableName,@C1=C1,@C2=C2,@C3=C3,@Mode=Mode,@Description=Description
+                FROM @Checks WHERE Id=@Id;
+            IF OBJECT_ID(N'dbo.'+QUOTENAME(@Table),N'U') IS NULL CONTINUE;
+            IF @Mode<>0 AND COL_LENGTH(N'dbo.'+QUOTENAME(@Table),@C1) IS NULL CONTINUE;
+            IF @Mode=2 AND (COL_LENGTH(N'dbo.'+QUOTENAME(@Table),@C2) IS NULL
+                OR COL_LENGTH(N'dbo.'+QUOTENAME(@Table),@C3) IS NULL) CONTINUE;
+            SET @Value=N'LTRIM(RTRIM(CONVERT(nvarchar(max),'+QUOTENAME(@C1)+N')))';
+            IF @Mode=2 SET @Value=N'CONCAT(CONVERT(bigint,'+QUOTENAME(@C1)+N'),N''-'',CONVERT(bigint,'+
+                QUOTENAME(@C2)+N'),N''-'',CONVERT(bigint,'+QUOTENAME(@C3)+N'))';
+            SET @Predicate=N'1=1';
+            IF @Mode IN(1,2) SET @Predicate=@Value+N'=@Code OR LEFT('+@Value+N',LEN(@Code)+1)=@Code+N''-'''+
+                N' OR LEFT(@Code,LEN('+@Value+N')+1)='+@Value+N'+N''-''';
+            IF @Mode IN(3,4)
+            BEGIN
+                SET @Value=N'REPLACE(REPLACE(REPLACE(REPLACE('+@Value+N',N''ي'',N''ی''),N''ك'',N''ک''),N'' '',N''''),NCHAR(8204),N'''')';
+                SET @Predicate=@Value+N' LIKE N''%پورسان%'' OR '+@Value+N' LIKE N''%پرسانت%'' OR '+@Value+
+                    N' LIKE N''%پورسنت%'' OR '+@Value+N' LIKE N''%پرسنت%'' OR '+@Value+N' LIKE N''%درصدسهم%'' OR '+
+                    @Value+N' LIKE N''%کمیسیون%'' OR '+@Value+N' LIKE N''%حقالعمل%''';
+                IF @Mode=4 SET @Predicate=@Predicate+N' OR (LEFT('+@Value+N',1) IN(N''~'',N''.'') AND LEN('+@Value+N')>1)';
+            END;
+            IF @Mode=5 SET @Predicate=N'NULLIF('+@Value+N',N'''') IS NOT NULL AND '+@Value+N'<>N''0''';
+            SET @Found=0;
+            SET @Sql=N'IF EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Table)+N' WITH(HOLDLOCK) WHERE '+@Predicate+
+                N') SET @Found=1;';
+            EXEC sys.sp_executesql @Sql,N'@Code nvarchar(100),@Found bit OUTPUT',@Code=@Code,@Found=@Found OUTPUT;
+            IF @Found=1 SET @Reason=@Description;
+        END;
+        IF @CLEAR_CONFIRMED=1
+        BEGIN
+            IF @Reason IS NOT NULL
+                THROW 51031,N'نشانهٔ مصرف پورسانت وجود دارد؛ حساب خالی نشد. حساب صحیح را در حساب‌های خودگردان تعیین کنید.',1;
+            UPDATE dbo.SAZMAN SET HPOR=NULL WHERE LTRIM(RTRIM(HPOR))=@EXPECTED_CODE;
+            IF @@ROWCOUNT<>1 THROW 51030,N'حساب پورسانت تغییر کرده است؛ تبدیل را دوباره اجرا کنید.',1;
+            SET @Cleared=1;
+        END;
+    END;
+    ELSE IF @CLEAR_CONFIRMED=1
+        THROW 51030,N'حساب پورسانت اکنون معتبر است؛ خالی نشد. تبدیل را دوباره اجرا کنید.',1;
+    COMMIT TRANSACTION;
+    SELECT @Code AS Code,@Invalid AS IsInvalid,@Reason AS UsageReason,@Cleared AS Cleared;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT>0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;";
+
     // TR_ snapshots are written by CL_HESABDARI.TR, not database triggers.
     // Identifiers below come only from this allowlist and SQL Server metadata.
     public const string DenaFarazHistorySql = @"

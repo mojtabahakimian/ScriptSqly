@@ -5627,6 +5627,7 @@ GO
 
    ستون‌های KALAS که استفاده می‌شوند:
      TAGCODE = 2   فاکتور فروش
+     TAGCODE = 4, 24  برگشت از فروش (از فاکتور، و آزاد) — کسر از فروش و بها
      KHFR          MABL_K − N_MOIN  (مبلغ خالص پس از تخفیف)
      MABRIAL       AVRAGE × MEGHk   (بهای تمام‌شده از کاردکس)
      MEGHk         مقدار کل
@@ -5702,7 +5703,10 @@ BEGIN
           AND   k.DATE_N BETWEEN @Lo AND @Hi
         GROUP BY CAST(s.CODE AS BIGINT)
     ),
-    /* ─── برگشت از فروش: TAGCODE = 4 ─── */
+    /* ─── برگشت از فروش: TAGCODE = 4 (برگشت از فاکتور) و 24 (رسیدِ برگشت از فروشِ آزاد) ───
+       هر دو در دفاتر به ۵۱۲ می‌روند. قبلاً فقط ۴ کم می‌شد؛ مهر ۱۴۰۵ برگشتِ آزاد
+       (۷٫۸ میلیارد روی کپیِ محلی) در فروشِ S12 مانده بود و سودِ صورت‌های مالی را
+       بالاتر از دفاتر نشان می‌داد. */
     Bargasht AS (
         SELECT  CAST(s.CODE AS BIGINT) AS Code,
                 SUM(k.MEGHk)     AS Qty,
@@ -5711,32 +5715,34 @@ BEGIN
         FROM    dbo.kalas_sub k
         JOIN    dbo.TAGCOD   tg ON tg.CODE = k.TAG
         JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
-        WHERE   k.TAG = 4
+        WHERE   k.TAG IN (4, 24)
           AND   k.DATE_N BETWEEN @Lo AND @Hi
         GROUP BY CAST(s.CODE AS BIGINT)
     )
+    /* FULL JOIN: برگشتِ کالایی که در همین ماه فروشی نداشته هم سطر می‌گیرد
+       (فروش و بهای منفی)؛ با LEFT JOIN بی‌صدا حذف می‌شد. */
     INSERT dbo.CC_ItemMargin
         (RunId, Code, QtySold, WeightKg, SalesAmount, CostAmount,
          UnitCost, UnitPrice, GrossSales, Discount, ReturnAmount, ReturnQty)
     SELECT  @RunId,
-            f.Code,
-            f.Qty      - ISNULL(b.Qty, 0),
+            COALESCE(f.Code, b.Code),
+            ISNULL(f.Qty, 0)      - ISNULL(b.Qty, 0),
             f.Weight,
-            f.NetSales - ISNULL(b.NetAmount, 0),      -- فروش خالص پس از برگشت
-            f.CostRial - ISNULL(b.CostRial, 0),       -- بهاي واقعي از کاردکس
-            CASE WHEN f.Qty - ISNULL(b.Qty,0) <> 0
-                 THEN (f.CostRial - ISNULL(b.CostRial,0))
-                      / (f.Qty - ISNULL(b.Qty,0)) END,
-            CASE WHEN f.Qty - ISNULL(b.Qty,0) <> 0
-                 THEN (f.NetSales - ISNULL(b.NetAmount,0))
-                      / (f.Qty - ISNULL(b.Qty,0)) END,
+            ISNULL(f.NetSales, 0) - ISNULL(b.NetAmount, 0),      -- فروش خالص پس از برگشت
+            ISNULL(f.CostRial, 0) - ISNULL(b.CostRial, 0),       -- بهاي واقعي از کاردکس
+            CASE WHEN ISNULL(f.Qty, 0) - ISNULL(b.Qty,0) <> 0
+                 THEN (ISNULL(f.CostRial, 0) - ISNULL(b.CostRial,0))
+                      / (ISNULL(f.Qty, 0) - ISNULL(b.Qty,0)) END,
+            CASE WHEN ISNULL(f.Qty, 0) - ISNULL(b.Qty,0) <> 0
+                 THEN (ISNULL(f.NetSales, 0) - ISNULL(b.NetAmount,0))
+                      / (ISNULL(f.Qty, 0) - ISNULL(b.Qty,0)) END,
             f.Gross,
             f.Discount,
             ISNULL(b.NetAmount, 0),
             ISNULL(b.Qty, 0)
     FROM    Forush f
-    LEFT    JOIN Bargasht b ON b.Code = f.Code
-    WHERE   f.Qty <> 0
+    FULL    JOIN Bargasht b ON b.Code = f.Code
+    WHERE   ISNULL(f.Qty, 0) <> 0 OR ISNULL(b.Qty, 0) <> 0
     OPTION  (RECOMPILE);   -- @Lo/@Hi متغیرند؛ بدون RECOMPILE تخمینِ تعدادِ سطرها کور است
 
     /* ─── هشدار: کالاي فروش‌رفته بدون نرخ کاردکس ───
@@ -7170,7 +7176,7 @@ GO
 
    ── هم‌خوانی با گزارش کل ──
    منطق محاسبه عیناً همان CC_sp_S12_CalcMargin است (فروش TAGCODE=2،
-   برگشت TAGCODE=4، بها از MABRIAL کاردکس)، فقط با یک کلید گروه‌بندی
+   برگشت TAGCODE=4 و 24، بها از MABRIAL کاردکس)، فقط با یک کلید گروه‌بندی
    بیشتر. پس جمعِ سطرهای هر کالا روی همه‌ی واحدها باید با سطر همان کالا
    در CC_ItemMargin برابر باشد.
 
@@ -7257,7 +7263,7 @@ BEGIN
           AND   k.DATE_N BETWEEN @Lo AND @Hi
         GROUP BY CAST(s.CODE AS BIGINT), au.UnitId
     ),
-    /* ─── برگشت از فروش: TAGCODE = 4 ─── */
+    /* ─── برگشت از فروش: TAGCODE = 4 و 24 (برگشت از فروشِ آزاد) — همان CC_sp_S12_CalcMargin ─── */
     Bargasht AS (
         SELECT  CAST(s.CODE AS BIGINT) AS Code,
                 au.UnitId        AS UnitId,
@@ -7269,34 +7275,36 @@ BEGIN
         JOIN    dbo.STUF_DEF s  ON s.CODE  = k.CODE
         LEFT    JOIN dbo.TCOD_ANBAR ta ON ta.CODE = k.ANBAR   -- = KALAS.ANBARCODE
         LEFT    JOIN AnbarUnit au ON au.Anbar = ta.CODE
-        WHERE   k.TAG = 4
+        WHERE   k.TAG IN (4, 24)
           AND   k.DATE_N BETWEEN @Lo AND @Hi
         GROUP BY CAST(s.CODE AS BIGINT), au.UnitId
     )
+    /* FULL JOIN مثلِ CC_sp_S12_CalcMargin؛ اینجا برگشت به انبارِ واحدی جز واحدِ فروش
+       هم دیگر گم نمی‌شود، پس جمعِ واحدها با جمعِ کل می‌خواند. */
     INSERT dbo.CC_ItemMarginUnit
         (RunId, UnitId, Code, QtySold, WeightKg, SalesAmount, CostAmount,
          UnitCost, UnitPrice, GrossSales, Discount, ReturnAmount, ReturnQty)
     SELECT  @RunId,
-            f.UnitId,
-            f.Code,
-            f.Qty      - ISNULL(b.Qty, 0),
+            CASE WHEN f.Code IS NOT NULL THEN f.UnitId ELSE b.UnitId END,
+            COALESCE(f.Code, b.Code),
+            ISNULL(f.Qty, 0)      - ISNULL(b.Qty, 0),
             f.Weight,
-            f.NetSales - ISNULL(b.NetAmount, 0),
-            f.CostRial - ISNULL(b.CostRial, 0),
-            CASE WHEN f.Qty - ISNULL(b.Qty,0) <> 0
-                 THEN (f.CostRial - ISNULL(b.CostRial,0))
-                      / (f.Qty - ISNULL(b.Qty,0)) END,
-            CASE WHEN f.Qty - ISNULL(b.Qty,0) <> 0
-                 THEN (f.NetSales - ISNULL(b.NetAmount,0))
-                      / (f.Qty - ISNULL(b.Qty,0)) END,
+            ISNULL(f.NetSales, 0) - ISNULL(b.NetAmount, 0),
+            ISNULL(f.CostRial, 0) - ISNULL(b.CostRial, 0),
+            CASE WHEN ISNULL(f.Qty, 0) - ISNULL(b.Qty,0) <> 0
+                 THEN (ISNULL(f.CostRial, 0) - ISNULL(b.CostRial,0))
+                      / (ISNULL(f.Qty, 0) - ISNULL(b.Qty,0)) END,
+            CASE WHEN ISNULL(f.Qty, 0) - ISNULL(b.Qty,0) <> 0
+                 THEN (ISNULL(f.NetSales, 0) - ISNULL(b.NetAmount,0))
+                      / (ISNULL(f.Qty, 0) - ISNULL(b.Qty,0)) END,
             f.Gross,
             f.Discount,
             ISNULL(b.NetAmount, 0),
             ISNULL(b.Qty, 0)
     FROM    Forush f
-    LEFT    JOIN Bargasht b ON b.Code = f.Code
+    FULL    JOIN Bargasht b ON b.Code = f.Code
                            AND ISNULL(b.UnitId, -1) = ISNULL(f.UnitId, -1)
-    WHERE   f.Qty <> 0
+    WHERE   ISNULL(f.Qty, 0) <> 0 OR ISNULL(b.Qty, 0) <> 0
     OPTION  (RECOMPILE);
 
     INSERT dbo.CC_RunLog (RunId, StepCode, Severity, Message, ContextJson)
@@ -7788,6 +7796,21 @@ BEGIN
     DECLARE @Sales FLOAT = ISNULL((SELECT SUM(SalesAmount) FROM dbo.CC_ItemMargin WHERE RunId=@RunId), 0),
             @S12Cost FLOAT = ISNULL((SELECT SUM(CostAmount) FROM dbo.CC_ItemMargin WHERE RunId=@RunId), 0);
 
+    ---- تطبیقِ فروش با دفاتر
+    -- فروشِ S12 از کاردکسِ فاکتورها و برگشت‌هاست. دفاتر (کل‌های فروش، برگشت از فروش و تخفیفاتِ
+    -- «مشخصات سیستم»: SAZMAN.FROSH/MFROSH/TFROSH) چیزهایی هم دارند که در کاردکس نیست — مثلاً
+    -- تخفیفی که با سندِ دستی خورده (مهر ۱۴۰۵: ۱٫۴ میلیارد روی کپیِ محلی). مثلِ تطبیقِ بهای
+    -- فروش‌رفته، عدد دستکاری نمی‌شود؛ اختلاف فقط نشان داده می‌شود.
+    DECLARE @KFrosh INT, @KMFrosh INT, @KTFrosh INT;
+    SELECT TOP 1 @KFrosh = CAST(FROSH AS INT), @KMFrosh = CAST(MFROSH AS INT), @KTFrosh = CAST(TFROSH AS INT)
+    FROM   dbo.SAZMAN;
+    DECLARE @LedgerSales FLOAT = ISNULL((
+        SELECT SUM(d.BES) - SUM(d.BED)
+        FROM   dbo.DEED_DTL d
+        JOIN   dbo.DEED_HED hd ON hd.N_S = d.N_S
+        WHERE  hd.DATE_S BETWEEN @DT1 AND @DT2
+          AND  d.HES_K IN (@KFrosh, @KMFrosh, @KTFrosh)), 0);
+
     /* ═══ ۱) صورت بهای تمام‌شده کالای ساخته‌شده ═══ */
     SELECT * FROM (VALUES
         (10, N'موجودی اول دوره مواد',                @MatOpen,  0),
@@ -7859,7 +7882,9 @@ BEGIN
         (100, N'ــ درصد سود ناخالص',
              CASE WHEN @Sales <> 0 THEN ROUND(@Gross / @Sales * 100, 1) END, 3),
         (110, N'ــ درصد سود عملیاتی',
-             CASE WHEN @Sales <> 0 THEN ROUND((@Gross - @ExpAll) / @Sales * 100, 1) END, 3)
+             CASE WHEN @Sales <> 0 THEN ROUND((@Gross - @ExpAll) / @Sales * 100, 1) END, 3),
+        (120, N'ــ تطبیق: فروش خالص طبق دفاتر',      @LedgerSales, 3),
+        (130, N'ــ اختلاف فروش با دفاتر',             @Sales - @LedgerSales, 3)
     ) v(ردیف, شرح, مبلغ, نوع)
     ORDER BY ردیف;
 

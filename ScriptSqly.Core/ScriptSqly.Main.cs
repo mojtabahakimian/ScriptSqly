@@ -3399,6 +3399,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     ExportSalesAccountScript(db); //Safir: حسابِ خودگردانِ «فروش صادرات» (SAZMAN.SFROSH)
                     AutoAccountsModernScript(db); //حساب‌های خودگردانِ مدرن (SAZMAN.AUTO_MODERN + AUTO_HES)؛ Safir و MrCorrect
                     AdminFormsScript(db); //Safir: فرمِ جدای «به‌روزرسانی دیتابیس» و سه صفحه‌ی مدیریتِ دستیار (به‌جای PAY2_ADMIN_ACL)
+                    AccClerkScript(db); //کارمند حسابداری مجازی در Safir (پیش‌فرض خاموش)
                 }
 
                 //1405/03/05

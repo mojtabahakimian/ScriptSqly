@@ -3172,6 +3172,8 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                         // Step 2: Create the Stored Procedure
                         // ---------------------------------------------------------
 
+                        // متن همان Server/Database/sp_mogudi_tafkik_optimized.sql ِ Safir است (قاعده‌های InventoryService.StockFixSql)؛
+                        // مو‌به‌مو یکی بماند. فی، رزرو، بارگیری‌نشده، تبدیل کالا و فاصله‌های انبار در نسخه‌ی قبلی غلط بود.
                         ExecuteMigration(db, "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;");
                         string createSql = $@"
                 CREATE OR ALTER PROCEDURE [dbo].[sp_Mogudi_Tafkik_Optimized]
@@ -3180,190 +3182,92 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                 AS
                 BEGIN
                     SET NOCOUNT ON;
+                    DECLARE @to BIGINT = @Forms___F_MENU_ANBAR___DT2;
+                    DECLARE @AnbarID INT = CASE WHEN @Forms___F_MENU_ANBAR___MANBAR <> '%' AND ISNUMERIC(@Forms___F_MENU_ANBAR___MANBAR) = 1
+                                                THEN CAST(@Forms___F_MENU_ANBAR___MANBAR AS INT) END;
 
-                    -- 1. مدیریت پارامتر انبار
-                    DECLARE @AnbarID INT;
-                    IF @Forms___F_MENU_ANBAR___MANBAR <> '%' AND ISNUMERIC(@Forms___F_MENU_ANBAR___MANBAR) = 1
-                        SET @AnbarID = CAST(@Forms___F_MENU_ANBAR___MANBAR AS INT);
-                    ELSE
-                        SET @AnbarID = NULL;
-
-                    -- 2. جدول موقت برای محاسبه آخرین نرخ میانگین
-                    IF OBJECT_ID('tempdb..#LastPrices') IS NOT NULL DROP TABLE #LastPrices;
-
-                    SELECT 
-                        CODE, 
-                        ANBAR, 
-                        AVRAGE,
-                        FI_A
-                    INTO #LastPrices
-                    FROM (
-                        SELECT 
-                            i.CODE, 
-                            i.ANBAR, 
-                            i.AVRAGE,
-                            NULL AS FI_A,
-                            ROW_NUMBER() OVER (PARTITION BY i.CODE, i.ANBAR ORDER BY H.DATE_N DESC, i.NUMBER DESC) AS Rn
-                        FROM dbo.INVO_LST i
-                        INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
-                        WHERE h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
-                          AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
-                    ) T
-                    WHERE Rn = 1;
-
-                    -- بروزرسانی نرخ از STUF_FSK اگر در گردش نبود
-                    UPDATE #LastPrices
-                    SET AVRAGE = S.FI_A
-                    FROM #LastPrices L
-                    INNER JOIN dbo.STUF_FSK S ON L.CODE = S.CODE AND L.ANBAR = S.ANBAR
-                    WHERE L.AVRAGE IS NULL;
-                    
+                    SELECT CODE, ANBAR, AV INTO #LastPrices
+                    FROM (SELECT CODE, ANBAR, AV, ROW_NUMBER() OVER (PARTITION BY CODE, ANBAR ORDER BY DATE_N DESC, NUMBER DESC, AV) rn
+                          FROM (SELECT i.CODE, CAST(i.ANBAR AS INT) ANBAR, i.AVRAGE AV, h.DATE_N, i.NUMBER, i.TAG
+                                FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                                WHERE h.DATE_N <= @to AND i.TAG <> 20 AND i.TAG <> 23 AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
+                                UNION
+                                SELECT CASE WHEN i.TAG = 30 THEN i.N_RASID ELSE i.CODE END, CAST(i.ANBARF AS INT), i.AVRAGE2, h.DATE_N, i.NUMBER, i.TAG
+                                FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                                WHERE h.DATE_N <= @to AND i.TAG <> 20 AND i.TAG <> 23 AND i.ANBARF IS NOT NULL AND (i.TAG <> 30 OR i.N_RASID IS NOT NULL)
+                                  AND (@AnbarID IS NULL OR i.ANBARF = @AnbarID)) s) t
+                    WHERE rn = 1;
                     CREATE CLUSTERED INDEX IX_LastPrices ON #LastPrices(CODE, ANBAR);
 
-                    -- 3. جدول موقت اصلی برای تجمیع محاسبات
-                    IF OBJECT_ID('tempdb..#FinalAggregates') IS NOT NULL DROP TABLE #FinalAggregates;
-
-                    SELECT 
-                        T.CODE,
-                        T.ANBAR,
-                        SUM(CASE 
-                            WHEN SourceType = 'STUF_FSK' THEN T.Val1 
-                            WHEN SourceType = 'INVO_IN' THEN T.Val1 
-                            WHEN SourceType = 'INVO_TAG22' THEN T.Val1
-                            WHEN SourceType = 'INVO_TAG5_IN' THEN T.Val1
-                            WHEN SourceType = 'ANBGRD_IN' THEN T.Val1
-                            ELSE 0 END) AS SMEGH,
-                            
-                        SUM(CASE 
-                            WHEN SourceType = 'INVO_OUT' THEN T.Val1
-                            WHEN SourceType = 'ANBGRD_OUT' THEN T.Val1
-                            WHEN SourceType = 'INVO_RES_OUT' THEN T.Val1
-                            ELSE 0 END) AS MEGF,
-
-                        SUM(CASE WHEN SourceType = 'NOT_LOADED' THEN T.Val1 ELSE 0 END) AS MEGBARG,
-                        SUM(CASE WHEN SourceType = 'RESERVED' THEN T.Val1 ELSE 0 END) AS MEGHRES
-
+                    SELECT T.CODE, T.ANBAR,
+                           SUM(CASE WHEN T.K = 'Q' THEN T.V ELSE 0 END) AS QTY,
+                           SUM(CASE WHEN T.K = 'NL' THEN T.V ELSE 0 END) AS MEGBARG,
+                           SUM(CASE WHEN T.K = 'RES' THEN T.V ELSE 0 END) AS MEGHRES
                     INTO #FinalAggregates
                     FROM (
-                        -- الف) موجودی اول دوره
-                        SELECT CODE, ANBAR, MOGODI_A AS Val1, 'STUF_FSK' AS SourceType
-                        FROM dbo.STUF_FSK
-                        WHERE (@AnbarID IS NULL OR ANBAR = @AnbarID)
-
+                        SELECT CODE, ANBAR, CAST(MOGODI_A AS DECIMAL(38, 10)) AS V, 'Q' AS K FROM dbo.STUF_FSK WHERE @AnbarID IS NULL OR ANBAR = @AnbarID
                         UNION ALL
-
-                        -- ب) محاسبات INVO_LST
-                        SELECT 
-                            i.CODE, 
-                            i.ANBAR, 
-                            CASE 
-                                WHEN i.TAG IN (1, 7, 9, 24) THEN (i.MEGHk - i.MEGH_MAR)
-                                WHEN i.TAG = 22 THEN i.MEGH_MAR
-                                WHEN i.TAG IN (2, 5, 8, 10, 11, 26) THEN (i.MEGHk - i.MEGH_MAR)
-                                WHEN i.TAG = 20 AND (h.TAMIR = 1 OR h.TAMIR = 4) THEN i.MEGHk
-                                WHEN i.TAG = 2 AND h.TAMIR = 0 THEN i.MEGHk
-                                ELSE 0 
-                            END AS Val1,
-                            
-                            CASE 
-                                WHEN i.TAG IN (1, 7, 9, 24) THEN 'INVO_IN'
-                                WHEN i.TAG = 22 THEN 'INVO_TAG22'
-                                WHEN i.TAG IN (2, 5, 8, 10, 11, 26) THEN 'INVO_OUT'
-                                WHEN i.TAG = 20 AND (h.TAMIR = 1 OR h.TAMIR = 4) THEN 'RESERVED'
-                                WHEN i.TAG = 2 AND h.TAMIR = 0 THEN 'NOT_LOADED'
-                                ELSE 'OTHER'
-                            END AS SourceType
-
-                        FROM dbo.INVO_LST i 
-                        INNER JOIN dbo.HEAD_LST h  ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
-                        WHERE h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
-                          AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
-
+                        SELECT i.CODE, i.ANBAR,
+                               CAST(CASE WHEN i.TAG IN (1, 7, 9, 24) THEN i.MEGHk - i.MEGH_MAR
+                                         WHEN i.TAG = 22 THEN i.MEGH_MAR
+                                         WHEN i.TAG IN (2, 5, 8, 10, 11, 26) THEN i.MEGH_MAR - i.MEGHk
+                                         WHEN i.TAG = 30 OR i.TAG = 20 AND h.TAMIR IN (1, 4) THEN -i.MEGHk
+                                         ELSE 0 END AS DECIMAL(38, 10)), 'Q'
+                        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                        WHERE h.DATE_N <= @to AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
                         UNION ALL
-
-                        -- پ) انتقال بین انبار
-                        SELECT 
-                            i.CODE, 
-                            CAST(i.ANBARF AS INT) AS ANBAR,
-                            (i.MEGHk - i.MEGH_MAR) AS Val1,
-                            'INVO_TAG5_IN' AS SourceType
-                        FROM dbo.INVO_LST i
-                        INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
-                        WHERE i.TAG = 5
-                          AND h.DATE_N <= @Forms___F_MENU_ANBAR___DT2
-                          AND (@AnbarID IS NULL OR i.ANBARF = @AnbarID)
-
+                        SELECT i.CODE, i.ANBAR, CAST(i.MEGHk AS DECIMAL(38, 10)), 'RES'
+                        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                        WHERE i.TAG = 20 AND h.TAMIR IN (1, 4) AND h.DATE_N <= @to AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
                         UNION ALL
-
-                        -- ت) انبارگردانی
-                        SELECT 
-                            L.CODE,
-                            H.GRD_ANBAR AS ANBAR,
-                            CASE 
-                                WHEN (L.MOG - L.NUM3) > 0 THEN (L.MOG - L.NUM3)
-                                ELSE ((L.MOG - L.NUM3) * -1)
-                            END AS Val1,
-                            CASE 
-                                WHEN (L.MOG - L.NUM3) > 0 THEN 'ANBGRD_OUT'
-                                ELSE 'ANBGRD_IN'
-                            END AS SourceType
-                        FROM dbo.ANBGRD_LST L 
-                        INNER JOIN dbo.ANBGRD_HEAD H  ON L.GRD_NUM = H.GRD_NUM
-                        WHERE H.GRD_DATE <= @Forms___F_MENU_ANBAR___DT2
-                          AND H.N_S IS NOT NULL
-                          AND (@AnbarID IS NULL OR H.GRD_ANBAR = @AnbarID)
-
+                        SELECT i.CODE, i.ANBAR, CAST(i.MEGHk AS DECIMAL(38, 10)), 'NL'
+                        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                        WHERE i.TAG = 2 AND h.TAMIR = 0 AND h.DATE_N <= @to AND (@AnbarID IS NULL OR i.ANBAR = @AnbarID)
+                        UNION ALL
+                        SELECT i.CODE, CAST(i.ANBARF AS INT), CAST(i.MEGHk - i.MEGH_MAR AS DECIMAL(38, 10)), 'Q'
+                        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                        WHERE i.TAG = 5 AND h.DATE_N <= @to AND (@AnbarID IS NULL OR i.ANBARF = @AnbarID)
+                        UNION ALL
+                        SELECT i.N_RASID, CAST(i.ANBARF AS INT), CAST(i.MEGH_MAR AS DECIMAL(38, 10)), 'Q'
+                        FROM dbo.INVO_LST i INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+                        WHERE i.TAG = 30 AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+                          AND h.DATE_N <= @to AND (@AnbarID IS NULL OR i.ANBARF = @AnbarID)
+                        UNION ALL
+                        SELECT L.CODE, H.GRD_ANBAR, CAST(L.NUM3 - L.MOG AS DECIMAL(38, 10)), 'Q'
+                        FROM dbo.ANBGRD_LST L INNER JOIN dbo.ANBGRD_HEAD H ON L.GRD_NUM = H.GRD_NUM
+                        WHERE H.GRD_DATE <= @to AND H.N_S IS NOT NULL AND (@AnbarID IS NULL OR H.GRD_ANBAR = @AnbarID)
                     ) T
                     GROUP BY T.CODE, T.ANBAR;
-                    
                     CREATE CLUSTERED INDEX IX_FinalAggregates ON #FinalAggregates(CODE, ANBAR);
 
-                    -- 4. گزارش نهایی
-                    SELECT 
-                        FA.CODE,
-                        ROUND(ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0), 2) AS MAND,
-                        ISNULL(FA.ANBAR, 0) AS ANBAR,
-                        A.NAMES AS ANBARN,
-                        ISNULL(LP.AVRAGE, 0) AS FII, 
-                        ISNULL(ISNULL(LP.AVRAGE, 0) * (ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 0) AS MABLK,
-                        D.NAME,
-                        V.NAMES,
-                        CAST(FA.CODE AS BIGINT) AS VCOD,
-                        G.CODE AS GRCOD,
-                        G.NAMES AS GRNAME,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)) / ISNULL(NULLIF(N.FNESBAT, 0), 1), 0) AS MANDF,
-                        D.N_FANI,
-                        ISNULL(N.FNESBAT, 1) AS NESBAT,
-                        ISNULL(FA.MEGBARG, 0) AS MEGHBAR,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) - ISNULL(D.B_SEF, 0) AS bsef,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) - ISNULL(D.N_SEF, 0) AS nsef,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) - ISNULL(D.MIN_M, 0) AS minm,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) - ISNULL(D.MAX_M, 0) AS maxm,
-                        D.MAX_M,
-                        D.VAZN,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) * ISNULL(D.VAZN, 0) AS VAZNK,
-                        M.NAMES AS menuit,
-                        D.MABL_F,
-                        D.B_SEF,
-                        ROUND((ISNULL(FA.SMEGH, 0) - ISNULL(FA.MEGF, 0)), 2) + ISNULL(FA.MEGBARG, 0) + ISNULL(FA.MEGHRES, 0) AS fisiclymand,
-                        D.MAX_M AS MAX_M_Def,
-                        ISNULL(FA.MEGHRES, 0) AS MEGHRES,
-                        S.POSITION
-
+                    SELECT FA.CODE, M.MAND, ISNULL(FA.ANBAR, 0) AS ANBAR, A.NAMES AS ANBARN,
+                           P.FII, P.FII * CAST(ISNULL(FA.QTY, 0) AS FLOAT) AS MABLK,
+                           D.NAME, V.NAMES, CAST(FA.CODE AS BIGINT) AS VCOD, G.CODE AS GRCOD, G.NAMES AS GRNAME,
+                           CAST(CASE WHEN ABS(NS.NESBAT) >= 1e-6 AND ABS(NS.NESBAT) < 1e12
+                                     THEN ROUND(CAST(ISNULL(FA.QTY, 0) AS DECIMAL(28, 10)) / CAST(NS.NESBAT AS DECIMAL(20, 8)), 0)
+                                     ELSE ROUND(CAST(ISNULL(FA.QTY, 0) AS FLOAT) / NS.NESBAT, 0) END AS FLOAT) AS MANDF,
+                           D.N_FANI, ISNULL(N.FNESBAT, 1) AS NESBAT, CAST(ISNULL(FA.MEGBARG, 0) AS FLOAT) AS MEGHBAR,
+                           M.MAND - ISNULL(S.B_SEF, 0) AS bsef,
+                           M.MAND - ISNULL(S.N_SEF, 0) AS nsef,
+                           M.MAND - ISNULL(S.MIN_M, 0) AS minm,
+                           M.MAND - ISNULL(S.MAX_M, 0) AS maxm,
+                           D.MAX_M, D.VAZN, M.MAND * ISNULL(D.VAZN, 0) AS VAZNK, MI.NAMES AS menuit, D.MABL_F, D.B_SEF,
+                           M.MAND + CAST(ISNULL(FA.MEGBARG, 0) + ISNULL(FA.MEGHRES, 0) AS FLOAT) AS fisiclymand,
+                           D.MAX_M AS MAX_M_Def, CAST(ISNULL(FA.MEGHRES, 0) AS FLOAT) AS MEGHRES, S.POSITION
                     FROM #FinalAggregates FA
-                    INNER JOIN dbo.STUF_DEF D  ON FA.CODE = D.CODE
-                    INNER JOIN dbo.TCOD_ANBAR A  ON FA.ANBAR = A.CODE
-                    INNER JOIN dbo.TCOD_VAHEDS V  ON D.VAHED = V.CODE
+                    CROSS APPLY (SELECT CAST(ROUND(ISNULL(FA.QTY, 0), 2) AS FLOAT) AS MAND) M
+                    INNER JOIN dbo.STUF_DEF D ON FA.CODE = D.CODE
+                    INNER JOIN dbo.TCOD_ANBAR A ON FA.ANBAR = A.CODE
+                    INNER JOIN dbo.TCOD_VAHEDS V ON D.VAHED = V.CODE
                     LEFT JOIN #LastPrices LP ON FA.CODE = LP.CODE AND FA.ANBAR = LP.ANBAR
-                    LEFT JOIN dbo.STUF_FSK S  ON FA.CODE = S.CODE AND FA.ANBAR = S.ANBAR
-                    LEFT JOIN dbo.TCOD_STUFGROUP G  ON D.RADAH = G.CODE
-                    LEFT JOIN dbo.TCODE_MENUITEM M  ON D.MENUIT = M.CODE
+                    LEFT JOIN dbo.STUF_FSK S ON FA.CODE = S.CODE AND FA.ANBAR = S.ANBAR
+                    CROSS APPLY (SELECT COALESCE(LP.AV, S.FI_A, 0) AS FII) P
+                    LEFT JOIN dbo.TCOD_STUFGROUP G ON D.RADAH = G.CODE
+                    LEFT JOIN dbo.TCODE_MENUITEM MI ON D.MENUIT = MI.CODE
                     LEFT JOIN dbo.FNESBAT N ON D.CODE = N.CODE
-                    
+                    CROSS APPLY (SELECT CASE WHEN ISNULL(N.FNESBAT, 0) = 0 THEN 1 ELSE N.FNESBAT END AS NESBAT) NS
+                    WHERE S.CODE IS NOT NULL OR ISNULL(FA.QTY, 0) <> 0 OR ISNULL(FA.MEGBARG, 0) <> 0 OR ISNULL(FA.MEGHRES, 0) <> 0
                     ORDER BY FA.CODE;
-
-                    DROP TABLE #LastPrices;
-                    DROP TABLE #FinalAggregates;
                 END
             ";
 

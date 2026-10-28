@@ -3304,6 +3304,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AutoAccountsModernScript(db); //حساب‌های خودگردانِ مدرن (SAZMAN.AUTO_MODERN + AUTO_HES)؛ Safir و MrCorrect
                     AdminFormsScript(db); //Safir: فرمِ جدای «به‌روزرسانی دیتابیس» و سه صفحه‌ی مدیریتِ دستیار (به‌جای PAY2_ADMIN_ACL)
                     AccClerkScript(db); //کارمند حسابداری مجازی در Safir (پیش‌فرض خاموش)
+                    TarazAnbarQtyScript(db); //تراز انبار: مقدار برابرِ کارتِ کالا (UNION ALL و ورودِ تبدیل کالا در MOG_EN / MOG_FR_A_sub)
                 }
 
                 //1405/03/05

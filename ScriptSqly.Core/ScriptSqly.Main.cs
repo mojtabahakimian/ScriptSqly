@@ -3305,6 +3305,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AdminFormsScript(db); //Safir: فرمِ جدای «به‌روزرسانی دیتابیس» و سه صفحه‌ی مدیریتِ دستیار (به‌جای PAY2_ADMIN_ACL)
                     AccClerkScript(db); //کارمند حسابداری مجازی در Safir (پیش‌فرض خاموش)
                     TarazAnbarQtyScript(db); //تراز انبار: مقدار برابرِ کارتِ کالا (UNION ALL و ورودِ تبدیل کالا در MOG_EN / MOG_FR_A_sub)
+                    AmvalAssetsScript(db); //جمع‌داری اموال در Safir: استهلاک، خروج، تحویل‌گیرنده و جابه‌جایی (جدول‌های جدا کنارِ AMVAL)
                 }
 
                 //1405/03/05

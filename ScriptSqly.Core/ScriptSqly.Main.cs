@@ -3308,6 +3308,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AmvalAssetsScript(db); //جمع‌داری اموال در Safir: استهلاک، خروج، تحویل‌گیرنده و جابه‌جایی (جدول‌های جدا کنارِ AMVAL)
                     BalanceSheetMapScript(db); //صورت وضعیت مالی (ترازنامه) در Safir: نگاشتِ حساب‌های کل به سطرهای استاندارد (ACC_BS_MAP)
                     AiAdvisorTitlesScript(db); //Safir: نامِ سه فرمِ دسترسیِ «مشاور ارشد هوشمند» (به‌جای «دستیار هوش مصنوعی») در TFORMS
+                    GpsLocationScript(db); //Safir: «مسیر حرکت روی نقشه» — GPSLOCATION و ایندکسِ (FDATE, UID)
                 }
 
                 //1405/03/05

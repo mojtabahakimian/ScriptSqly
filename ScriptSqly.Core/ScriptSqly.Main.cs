@@ -3307,6 +3307,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     TarazAnbarQtyScript(db); //تراز انبار: مقدار برابرِ کارتِ کالا (UNION ALL و ورودِ تبدیل کالا در MOG_EN / MOG_FR_A_sub)
                     AmvalAssetsScript(db); //جمع‌داری اموال در Safir: استهلاک، خروج، تحویل‌گیرنده و جابه‌جایی (جدول‌های جدا کنارِ AMVAL)
                     BalanceSheetMapScript(db); //صورت وضعیت مالی (ترازنامه) در Safir: نگاشتِ حساب‌های کل به سطرهای استاندارد (ACC_BS_MAP)
+                    AiAdvisorTitlesScript(db); //Safir: نامِ سه فرمِ دسترسیِ «مشاور ارشد هوشمند» (به‌جای «دستیار هوش مصنوعی») در TFORMS
                 }
 
                 //1405/03/05

@@ -74,6 +74,8 @@ namespace ScriptSqly.Migrations
 
                 if (isCustomCall)
                 {
+                    if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.HEAD_LST',N'U') IS NULL THEN 0 ELSE 1 END") == 1)
+                        TryInvoiceReportViewScript(db);
                     TechnicalCodeMapGroupsScript(db);
                     SmsMessageTextScript(db);
                     AmvalArchiveScript(db);

@@ -7,7 +7,7 @@ namespace ScriptSqly.Migrations
         /// <summary>
         /// ورودِ وبِ سفیر: جدولِ SAFIR_USER_AUTH (رمزِ هش‌شده‌ی جدا و کدِ دومِ اختیاری برای کاربرانِ SALA_DTL).
         ///
-        /// متن زیر باید مو‌به‌مو با Server/Database/64-safir-user-auth.sql در مخزن Safir یکی بماند
+        /// متن زیر باید مو‌به‌مو با Server/Database/66-safir-user-auth.sql در مخزن Safir یکی بماند
         /// (آزمونِ SafirAuthMigrationTests.Migration_matches_the_ScriptSqly_copy همین را می‌سنجد). idempotent است.
         /// </summary>
         private static void SafirUserAuthScript(SqlConnection db)

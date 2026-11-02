@@ -6,7 +6,8 @@ namespace ScriptSqly.Migrations
     {
         /// <summary>
         /// مغایرت‌گیریِ بانک در Safir: صورتحساب‌های واردشده (BANK_STMT، BANK_STMT_LINE)، قالبِ فایلِ هر حساب (BANK_REC_ACCOUNT)
-        /// و تطبیقِ ردیف‌های بانک با دفاتر (BANK_REC_MATCH، BANK_REC_MATCH_BANK، BANK_REC_MATCH_BOOK).
+        /// و تطبیقِ ردیف‌های بانک با دفاتر (BANK_REC_MATCH، BANK_REC_MATCH_BANK، BANK_REC_MATCH_BOOK)
+        /// و قطعی کردنِ مغایرت‌گیری تا یک تاریخ (BANK_REC_CLOSE).
         ///
         /// متن زیر باید مو‌به‌مو با Server/Database/64-bank-rec.sql در مخزن Safir یکی بماند
         /// (آزمونِ BankRecTests.Migration_matches_the_ScriptSqly_copy همین را می‌سنجد). idempotent است.
@@ -29,6 +30,8 @@ namespace ScriptSqly.Migrations
                         حساب). هر ردیفِ بانک فقط در یک تطبیق (UX_BANK_REC_MATCH_BANK_LINE). ردیفِ دفتر با N_S، مبلغ و شرح نگه داشته
                         می‌شود و DTL_ID فقط نشانی است، چون «صدور سند» ِ خزانه ردیف‌های DEED_DTL را پاک و دوباره درج می‌کند.
                         KIND: ۱ دستی، ۲ خودکار، ۳ قاعده، ۴ قلمِ شروعِ دوره.
+   • BANK_REC_CLOSE   — قطعی کردنِ مغایرت‌گیری تا AS_OF: SNAPSHOT (JSON) عکسِ همان لحظه است — صورت مغایرت، ردیف‌های دفترِ تا AS_OF و
+                        تعداد و جمعِ ردیف‌های بانک — تا هر تغییرِ بعدی با تاریخِ تا AS_OF هشدار بگیرد. قفل نمی‌کند.
    جدول‌های MOGHHEAD و MO_DTL ِ WPF («مغایرت‌گیری یک حساب») دست نمی‌خورند. idempotent است.
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -124,6 +127,23 @@ BEGIN
         N_SERI float NULL
     );
     CREATE INDEX IX_BANK_REC_MATCH_BOOK_MATCH ON dbo.BANK_REC_MATCH_BOOK (MATCH_ID);
+END;
+GO
+
+IF OBJECT_ID(N'dbo.BANK_REC_CLOSE', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.BANK_REC_CLOSE (
+        ID int IDENTITY(1, 1) NOT NULL CONSTRAINT PK_BANK_REC_CLOSE PRIMARY KEY,
+        HES nvarchar(60) NOT NULL,
+        AS_OF bigint NOT NULL,
+        BANK_BAL float NOT NULL,
+        BOOK_BAL float NOT NULL,
+        SNAPSHOT nvarchar(max) NOT NULL,
+        USER_NAME nvarchar(100) NULL,
+        CRT datetime NOT NULL CONSTRAINT DF_BANK_REC_CLOSE_CRT DEFAULT GETDATE(),
+        UID int NULL
+    );
+    CREATE INDEX IX_BANK_REC_CLOSE_HES ON dbo.BANK_REC_CLOSE (HES, AS_OF);
 END;
 GO
 ";

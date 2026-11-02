@@ -3311,6 +3311,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     GpsLocationScript(db); //Safir: «مسیر حرکت روی نقشه» — GPSLOCATION و ایندکسِ (FDATE, UID)
                     BankRecScript(db); //Safir: مغایرت‌گیریِ بانک — صورتحساب‌های واردشده و تطبیق با دفاتر (BANK_STMT، BANK_REC_*)
                     WpfRetireScript(db); //Safir/MrCorrect: از رده خارج کردنِ مسترکارکت — فرمِ استثنای WPFRUN در TFORMS
+                    SafirUserAuthScript(db); //Safir: ورودِ وب — رمزِ هش‌شده‌ی جدا و کدِ دومِ اختیاری (SAFIR_USER_AUTH)
                 }
 
                 //1405/03/05

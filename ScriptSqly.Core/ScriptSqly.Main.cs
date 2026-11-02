@@ -3310,6 +3310,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AiAdvisorTitlesScript(db); //Safir: نامِ سه فرمِ دسترسیِ «مشاور ارشد هوشمند» (به‌جای «دستیار هوش مصنوعی») در TFORMS
                     GpsLocationScript(db); //Safir: «مسیر حرکت روی نقشه» — GPSLOCATION و ایندکسِ (FDATE, UID)
                     BankRecScript(db); //Safir: مغایرت‌گیریِ بانک — صورتحساب‌های واردشده و تطبیق با دفاتر (BANK_STMT، BANK_REC_*)
+                    WpfRetireScript(db); //Safir/MrCorrect: از رده خارج کردنِ مسترکارکت — فرمِ استثنای WPFRUN در TFORMS
                 }
 
                 //1405/03/05

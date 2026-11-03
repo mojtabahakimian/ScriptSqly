@@ -3316,6 +3316,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     SafirUserAuthScript(db); //Safir: ورودِ وب — رمزِ هش‌شده‌ی جدا و کدِ دومِ اختیاری (SAFIR_USER_AUTH)
                     CustomerPortalScript(db); //Safir: پرتال مشتری — ورود با کدِ پیامکی، فقط اطلاعاتِ خودِ مشتری (SAFIR_PORTAL_*، فرمِ CUSTOMER_PORTAL)
                     LotTraceScript(db); //Safir: ردیابیِ سری ساخت و تاریخ انقضا (TRACE_*) با «دریافتِ شماره‌ی سریالِ کالا» (OPTIONSS[49])
+                    LotTraceProductionScript(db); //Safir: ردیابیِ سری ساخت، تولید — سری‌های موادِ هر تولید (TRACE_GRP*)، پایدار در برابرِ بازسازیِ S07
                 }
 
                 //1405/03/05

@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 
 namespace ScriptSqly.Migrations;
 
@@ -95,13 +95,16 @@ END CATCH;
 ";
 
     public static void InvoiceReportViewScript(SqlConnection db, bool previewOnly = false)
-        => ExecuteMigration(db, InvoiceReportViewSql, new { PREVIEW_ONLY = previewOnly });
+    {
+        ExecuteMigration(db, InvoiceReportViewSql, new { PREVIEW_ONLY = previewOnly });
+        ConvertedPrintViewsScript(db, previewOnly);
+    }
 
     // در مسیر ارتقا/تبدیل، امتناعِ عمدی اسکریپت (نمای سفارشی، اجرای هم‌زمان، ساختار ناقص)
     // نباید بقیه‌ی مهاجرت‌ها را متوقف کند؛ ExecuteMigration خطا را در گزارش اجرا ثبت کرده است.
     internal static void TryInvoiceReportViewScript(SqlConnection db)
     {
         try { InvoiceReportViewScript(db); }
-        catch (SqlException ex) when (ex.Number is >= 51140 and <= 51149) { }
+        catch (SqlException ex) when (ex.Number is >= 51140 and <= 51154) { }
     }
 }

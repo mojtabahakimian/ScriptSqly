@@ -3318,6 +3318,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     LotTraceScript(db); //Safir: ردیابیِ سری ساخت و تاریخ انقضا (TRACE_*) با «دریافتِ شماره‌ی سریالِ کالا» (OPTIONSS[49])
                     LotTraceProductionScript(db); //Safir: ردیابیِ سری ساخت، تولید — سری‌های موادِ هر تولید (TRACE_GRP*)، پایدار در برابرِ بازسازیِ S07
                     LotTraceRecallScript(db); //Safir: ردیابیِ سری ساخت، شکایت و فراخوان — پرونده‌ی شکایت و فراخوانِ نسخه‌دار (TRACE_COMPLAINT*، TRACE_RECALL*)
+                    CustomerBlockScript(db); //Safir: مسدودی حساب مشتریان — فرمِ جدای CUSTOMER_BLOCK برای لیست سیاه (BLOCK_CUSTOMER)
                 }
 
                 //1405/03/05

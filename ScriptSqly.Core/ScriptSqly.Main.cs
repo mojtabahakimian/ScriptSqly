@@ -3320,6 +3320,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     LotTraceRecallScript(db); //Safir: ردیابیِ سری ساخت، شکایت و فراخوان — پرونده‌ی شکایت و فراخوانِ نسخه‌دار (TRACE_COMPLAINT*، TRACE_RECALL*)
                     CustomerBlockScript(db); //Safir: مسدودی حساب مشتریان — فرمِ جدای CUSTOMER_BLOCK برای لیست سیاه (BLOCK_CUSTOMER)
                     ComplaintOtpScript(db); //Safir: تأییدِ موبایلِ فرمِ عمومیِ شکایت با کدِ پیامکی (SAFIR_COMPLAINT_OTP)
+                    CmmsScript(db); //Safir: نگهداری و تعمیرات (CMMS) — جدول‌های PM_* ِ Access اگر نباشند، CMMS_* و فرم‌های PMHYGIENE/PMCONFIG
                 }
 
                 //1405/03/05

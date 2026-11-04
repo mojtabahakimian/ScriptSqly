@@ -28,6 +28,14 @@ DECLARE @LegacyJobId uniqueidentifier;
 DECLARE @OwnTransaction bit = CASE WHEN @@TRANCOUNT = 0 THEN 1 ELSE 0 END;
 DECLARE @ReturnCode int;
 
+-- SQL Agent jobs live in msdb. A login without access to msdb (not sysadmin)
+-- cannot create the job; skip it instead of failing the whole upgrade.
+IF ISNULL(HAS_PERMS_BY_NAME(N'msdb.dbo.sysjobs', N'OBJECT', N'SELECT'), 0) = 0
+BEGIN
+    PRINT N'دسترسی به msdb نیست؛ کار زمان‌بندی لغو رزروهای منقضی ساخته نشد.';
+    RETURN;
+END;
+
 BEGIN TRY
     IF @OwnTransaction = 1 BEGIN TRANSACTION;
 

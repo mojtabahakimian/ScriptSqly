@@ -1,3 +1,4 @@
+using Dapper;
 using Microsoft.Data.SqlClient;
 
 namespace ScriptSqly.Migrations;
@@ -6,8 +7,15 @@ public static partial class ScriptSqly
 {
     // Keep identical to Server/Database/reservation_timeout_job.sql. Jobs belong
     // to msdb, so their names must distinguish customer databases on one server.
+    // Agent jobs need msdb rights (sysadmin). A login without them cannot create
+    // the job, so skip it instead of reporting the whole upgrade as failed.
     private static void ReservationTimeoutJobScript(SqlConnection db)
-        => ExecuteMigration(db, ReservationTimeoutJobSql);
+    {
+        if (db.ExecuteScalar<int>(@"SELECT ISNULL(HAS_PERMS_BY_NAME(N'msdb.dbo.sysjobs', N'OBJECT', N'SELECT'), 0)
+    & ISNULL(HAS_PERMS_BY_NAME(N'msdb.dbo.sp_add_job', N'OBJECT', N'EXECUTE'), 0)") != 1)
+            return;
+        ExecuteMigration(db, ReservationTimeoutJobSql);
+    }
 
     private const string ReservationTimeoutJobSql = @"
 DECLARE @DbName sysname = DB_NAME();

@@ -3322,6 +3322,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     ComplaintOtpScript(db); //Safir: تأییدِ موبایلِ فرمِ عمومیِ شکایت با کدِ پیامکی (SAFIR_COMPLAINT_OTP)
                     CmmsScript(db); //Safir: نگهداری و تعمیرات (CMMS) — جدول‌های PM_* ِ Access اگر نباشند، CMMS_* و فرم‌های PMHYGIENE/PMCONFIG
                     CmmsCarryScript(db); //Safir: CMMS فازِ دو — CMMS_WO.PREV_MAT (موادِ سالِ قبلِ دستور کارِ منتقل‌شده) و کلیدهای صدورِ خودکار
+                    BugReportTypeScript(db); //Safir: گزارش خطا — نوعِ گزارش (اشکال / درخواست امکان)، برچسب‌های مدیر و عکسِ پیوست (BugReportAttachments)
                 }
 
                 //1405/03/05

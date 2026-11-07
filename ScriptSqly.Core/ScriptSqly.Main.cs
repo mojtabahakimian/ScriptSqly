@@ -3324,6 +3324,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     CmmsCarryScript(db); //Safir: CMMS فازِ دو — CMMS_WO.PREV_MAT (موادِ سالِ قبلِ دستور کارِ منتقل‌شده) و کلیدهای صدورِ خودکار
                     BugReportTypeScript(db); //Safir: گزارش خطا — نوعِ گزارش (اشکال / درخواست امکان)، برچسب‌های مدیر و عکسِ پیوست (BugReportAttachments)
                     ClerkWatchScript(db); //Safir: کارمند حسابداری مجازی — پیگیری در پس‌زمینه «وقتی … ← آن‌وقت …» (VCL_Watch)، از جمله آزاد شدنِ خودکارِ مسدودی بعد از تسویه
+                    UserAccessLimitedScript(db); //Safir: «تعیین سطح دسترسی محدود» — فرمِ USER_ACCESS_LIMITED، بی دست زدن به مدیرانِ دسترسی و فرم‌هایی که دسترسی می‌دهند
                 }
 
                 //1405/03/05

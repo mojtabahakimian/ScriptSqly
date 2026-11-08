@@ -3683,6 +3683,23 @@ RETURN (
 
         UNION ALL
 
+        -- ورودی از تبدیل کالا (TAG 30 — انبار و کالای مقصد)
+        --
+        -- ⚠️ برخلاف همه‌ی شاخه‌های بالا، کد کالا از N_RASID می‌آید نه از
+        -- CODE: روی برگه‌ی تبدیل، CODE کالای مبدأ است و کالای مقصد در
+        -- N_RASID نشسته. مقدارش هم MEGH_MAR است، که اینجا «مرجوعی»
+        -- نیست — مقدارِ ورود است (توضیح در 41-item-conversion.sql).
+        -- همان Server/Database/21-mogha-anbar-tiebreak-fix.sql ِ سفیر؛ بی این سه شاخه، برگه‌ی تبدیل
+        -- از دیدِ این تابع (مغایرتِ انبار، AUD-33 ِ ممیز) اصلاً ثبت نشده بود.
+        SELECT i.N_RASID, SUM(i.MEGH_MAR), SUM(i.MABL_K), CAST(i.ANBARF AS INT)
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL AND i.MEGH_MAR > 0
+        GROUP BY i.N_RASID, CAST(i.ANBARF AS INT)
+        HAVING CAST(i.ANBARF AS INT) LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
         -- انبارگردانی (ورودی)
         SELECT l.CODE, SUM((l.MOG - l.NUM3) * -1), SUM(ABS(l.MOG - l.NUM3) * l.MABL), a.GRD_ANBAR
         FROM dbo.ANBGRD_LST l INNER JOIN dbo.ANBGRD_HEAD a ON l.GRD_NUM = a.GRD_NUM
@@ -3711,6 +3728,19 @@ RETURN (
         SELECT i.CODE, SUM(i.MEGHk) AS MEG, i.ANBAR
         FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
         WHERE i.TAG IN (2, 5, 8, 10, 11, 26) AND h.DATE_N <= @dt2
+        GROUP BY i.CODE, i.ANBAR
+        HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
+
+        UNION ALL
+
+        -- خروجی از تبدیل کالا (TAG 30 — انبار و کالای مبدأ)
+        --
+        -- عمداً جدا از فهرست بالا: آن‌جا فرمول MEGHk است و درست هم هست،
+        -- ولی اگر ۳۰ را داخلش می‌گذاشتیم، شاخه‌ی ورودِ بالا هم همان
+        -- ردیف را با CODE مبدأ می‌دید و کالای مبدأ دو بار شمرده می‌شد.
+        SELECT i.CODE, SUM(i.MEGHk), i.ANBAR
+        FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
+        WHERE i.TAG = 30 AND h.DATE_N <= @dt2
         GROUP BY i.CODE, i.ANBAR
         HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
 
@@ -3764,6 +3794,19 @@ RETURN (
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG = 5
+
+        UNION ALL
+
+        -- وارده از تبدیل کالا: نرخِ کالای مقصد در AVRAGE2 نشسته، همان‌جا
+        -- که انتقالی هم می‌نشیند. BARGAH از TAGCOD کد ۳۱ می‌آید چون این
+        -- رویداد سمتِ *ورود* است و باید با ورودها مرتب شود، نه با خروجِ
+        -- همان برگه.
+        SELECT i.N_RASID, CAST(i.ANBARF AS INT), i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
+        FROM dbo.INVO_LST i
+             INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+             INNER JOIN dbo.TAGCOD t ON t.CODE = 31
+        WHERE h.DATE_N <= @dt2 AND i.TAG = 30
+              AND i.N_RASID IS NOT NULL AND i.ANBARF IS NOT NULL
     ),
     -- وقتی یک سند یک کالا را در چند ردیف با نرخ‌های متفاوت ثبت کرده
     -- (مثلاً دو محموله‌ی هم‌روز با نرخ فرق)، ردیف‌ها در

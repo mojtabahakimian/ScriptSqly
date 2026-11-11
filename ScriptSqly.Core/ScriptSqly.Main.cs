@@ -3330,6 +3330,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     BugReportSoftwareScript(db); //Safir: گزارش خطا — «مربوط به کدام نرم‌افزار؟» (BugReports.Software: سفیر / مسترکارکت / Access)
                     WhatsAppSendScript(db); //Safir: ارسال به واتس‌اپ — فرمِ WHATSAPP_SEND و سوابقِ SAFIR_WA_SENDS (کاربر، گیرنده، سند، نتیجه)
                     AiSavedReportScript(db); //Safir: دستیار هوشمند — گزارش‌های ذخیره‌شده (AI_SavedReport) که دستیار با پرسش از کاربر می‌سازد
+                    BugSupportAgentScript(db); //Safir: گزارش خطا — «النا» پشتیبانِ هوش مصنوعی (BugReportAi، کارنامه و تنظیمات؛ پیش‌فرض خاموش)
                 }
 
                 //1405/03/05

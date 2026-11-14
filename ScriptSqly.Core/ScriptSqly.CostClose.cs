@@ -493,7 +493,7 @@ USING (VALUES
  ('CHK-06', N'حلقه در ساختار فرمول', 'S00', 5, 2, NULL,
   N'کالا مستقیم یا غیرمستقیم خودش را مصرف می‌کند. تا این حلقه شکسته نشود، محاسبه نرخ ممکن نیست.', 60),
 
- ('CHK-07', N'مانده نامتوازن مواد در حساب ۷۵۱', 'S00', 13, 1, 0.001,
+ ('CHK-07', N'مانده نامتوازن مواد در حساب کالای در جریان ساخت', 'S00', 13, 1, 0.001,
   N'اگر یک طرف صفر باشد، حواله جا افتاده است. آستانه یک در هزار است؛ کمتر از آن گِردکردن طبیعی است و نیاز به اقدام ندارد.', 70),
 
  ('CHK-08', N'اختلاف جذب برگه تولید با سند', 'S10', 10, 1, NULL,
@@ -515,10 +515,10 @@ USING (VALUES
   N'ماده در فرمول مقدار دارد ولی حواله‌اش با مقدار صفر صادر شده؛ یعنی فرمول پس از صدور حواله ویرایش شده است. خروج مواد باید بازسازی شود.', 130),
 
  ('CHK-15', N'فرمول با مقدار منفی', 'S00', 17, 2, NULL,
-  N'مقدار منفی در یک سطر فرمول قابل قبول نیست و باعث می‌شود مانده حساب کالای در جریان ساخت (۷۵۱) هرگز متوازن نشود. با دکمه اصلاح، آن سطر را صفر یا حذف کنید.', 75),
+  N'مقدار منفی در یک سطر فرمول قابل قبول نیست و باعث می‌شود مانده حساب کالای در جریان ساخت هرگز متوازن نشود. با دکمه اصلاح، آن سطر را صفر یا حذف کنید.', 75),
 
  ('CHK-16', N'برگه تولید به انبار بدون واحد تعریف‌شده', 'S00', 18, 1, NULL,
-  N'در تنظیمات ← واحدهای تولیدی، این انبار را به واحد مربوطه اضافه کنید. نقشش هر چه باشد مهم نیست — چون برگه تولید به آن می‌خورد، خودش به‌عنوان انبار محصولِ همان واحد شناخته می‌شود. ولی تا وقتی به هیچ واحدی وصل نباشد، معلوم نیست این تولید کار کدام واحد بوده و هزینه تبدیلش در هیچ واحدی جذب نمی‌شود و مانده حساب ۷۵۱ کاذب می‌ماند.', 45),
+  N'در تنظیمات ← واحدهای تولیدی، این انبار را به واحد مربوطه اضافه کنید. نقشش هر چه باشد مهم نیست — چون برگه تولید به آن می‌خورد، خودش به‌عنوان انبار محصولِ همان واحد شناخته می‌شود. ولی تا وقتی به هیچ واحدی وصل نباشد، معلوم نیست این تولید کار کدام واحد بوده و هزینه تبدیلش در هیچ واحدی جذب نمی‌شود و مانده حساب کالای در جریان ساخت کاذب می‌ماند.', 45),
 
  ('CHK-17', N'شمارش دوم/سوم انبارگردانی بدون مغایرت شمارش اول', 'S00', 19, 2, NULL,
   N'شمارش اول این کالا با موجودی سیستم برابر بوده، پس نباید وارد شمارش دوم/سوم می‌شد. ستون NUM2/NUM3 را که اشتباه پر شده صفر کنید — این عدد مستقیم مقدار پایان‌دوره‌ی کالا را در موتور نرخ غلط می‌کند.', 46),
@@ -931,6 +931,31 @@ BEGIN
     SELECT TableName AS جدول, BackupTable AS جدول_پشتيبان, RowsCopied AS تعداد_سطر
     FROM   dbo.CC_Snapshot
     WHERE  RunId = @RunId AND StepCode = @StepCode;
+END
+GO
+
+
+/* ═══════════════ حسابِ کلِ «کالای در جریان ساخت» ═══════════════
+   CHK-07 (همین فایل)، S10 (15-rate-engine-production.sql) و صفحه‌ی «هزینه
+   تبدیل» این کل را می‌خوانند. قبلاً ۷۵۱ ِ ثابت بود (کلِ یزد)؛ شرکتی با
+   کلِ دیگر (آرمان سرام: ۳۵) هیچ گردشی نمی‌دید و بی‌صدا صفر می‌گرفت.
+   همان قاعده‌ی Server/Hesabdari/AutoAccounts.cs: در حالتِ مدرن
+   (SAZMAN.AUTO_MODERN = 1) کلِ ردیفِ CONKAL ِ AUTO_HES، وگرنه SAZMAN.CONKAL.
+   AUTO_MODERN و AUTO_HES را 56-auto-accounts-modern.sql می‌سازد و شاید هنوز
+   نباشند، پس آن بخش پویاست. */
+CREATE OR ALTER PROCEDURE dbo.CC_sp_WipKol
+    @Kol INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SET @Kol = (SELECT TOP 1 CAST(CONKAL AS INT) FROM dbo.SAZMAN);
+
+    IF COL_LENGTH('dbo.SAZMAN', 'AUTO_MODERN') IS NOT NULL AND OBJECT_ID('dbo.AUTO_HES', 'U') IS NOT NULL
+        EXEC sp_executesql N'
+            IF (SELECT TOP 1 CAST(ISNULL(AUTO_MODERN, 0) AS bit) FROM dbo.SAZMAN) = 1
+                SELECT @Kol = HES_K FROM dbo.AUTO_HES WHERE COL = N''CONKAL'';',
+            N'@Kol INT OUTPUT', @Kol = @Kol OUTPUT;
 END
 GO
 
@@ -1409,9 +1434,11 @@ BEGIN
 
     DROP TABLE #E;
 
-    ---- CHK-07 : مانده نامتوازن مواد در ۷۵۱ (آستانه نسبي)
+    ---- CHK-07 : مانده نامتوازن مواد در حساب کالای در جریان ساخت (آستانه نسبي)
     DECLARE @th FLOAT =
         ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode='CHK-07'), 0.001);
+    DECLARE @KolWip INT;
+    EXEC dbo.CC_sp_WipKol @KolWip OUTPUT;
 
     -- DocNumber عمداً پر نمی‌شود: این قاعده مانده یک کالا را در کل بازه بررسی
     -- می‌کند، نه یک سند مشخص را؛ ستون HES_M (کد معین حسابداری) شمارهٔ برگهٔ
@@ -1429,7 +1456,7 @@ BEGIN
                  ELSE N'مانده نامتوازن مواد در حساب کالاي در جريان ساخت' END
     FROM    dbo.DEED_DTL d
     JOIN    dbo.DEED_HED hd ON hd.N_S = d.N_S
-    WHERE   d.HES_K = 751 AND d.HES_T <> 99999999
+    WHERE   d.HES_K = @KolWip AND d.HES_T <> 99999999
       AND   hd.DATE_S BETWEEN @DT1 AND @DT2
     GROUP BY d.HES_M, d.HES_T
     HAVING  (SUM(d.BED) = 0 AND SUM(d.BES) <> 0)
@@ -3447,7 +3474,8 @@ GO
    ضریب    = واقعی ÷ جذب‌شده
 
    کنترل متقابل: به شرط صفر بودن کار در جریان، جذب باید با
-   گردش بستانکار حساب ۷۵۱ با تفصیلی 99999999 برابر باشد.
+   گردش بستانکار حساب کالای در جریان ساخت (CC_sp_WipKol؛ یزد ۷۵۱)
+   با تفصیلی 99999999 برابر باشد.
    ═══════════════════════════════════════════════════════════════════ */
 CREATE OR ALTER PROCEDURE dbo.CC_sp_S10_BalanceConversion
     @RunId INT,
@@ -3463,6 +3491,8 @@ BEGIN
     DECLARE @TafDastmozd BIGINT = 99999999;   -- دستمزد (و روي اين پايگاه‌داده: سربار هم همين‌جا)
     DECLARE @TafSarbar   BIGINT = 99999998;   -- سربار، فقط وقتي نصب از دستمزد جدايش کرده باشد
     DECLARE @UnitId INT, @SplitMode TINYINT;
+    DECLARE @KolWip INT;                       -- کالاي در جريان ساخت؛ قبلاً ۷۵۱ ِ ثابت (12-procedures-phase1.sql)
+    EXEC dbo.CC_sp_WipKol @KolWip OUTPUT;
 
     -- تشخيص واحد از روي دپارتمان کنار گذاشته شد: دپارتمان را اپراتور دستي
     -- روي برگه مي‌زند و اشتباه تايپي رايج است. ملاک مطمئن، انباري است که
@@ -3558,7 +3588,7 @@ BEGIN
                     SUM(CASE WHEN d.HES_T = @TafSarbar   THEN d.BES - d.BED ELSE 0 END) AS OhAmt
             FROM    dbo.DEED_DTL d
             JOIN    dbo.DEED_HED hd ON hd.N_S = d.N_S
-            WHERE   d.HES_K = 751 AND d.HES_T IN (@TafDastmozd, @TafSarbar)
+            WHERE   d.HES_K = @KolWip AND d.HES_T IN (@TafDastmozd, @TafSarbar)
               AND   hd.DATE_S BETWEEN @DT1 AND @DT2
             GROUP BY TRY_CAST(d.HES_M AS BIGINT)
         ),
@@ -3685,7 +3715,7 @@ BEGIN
                     SUM(CASE WHEN d.HES_T = @TafSarbar   THEN d.BES - d.BED ELSE 0 END) AS OhAmt
             FROM    dbo.DEED_DTL d
             JOIN    dbo.DEED_HED hd ON hd.N_S = d.N_S
-            WHERE   d.HES_K = 751 AND d.HES_T IN (@TafDastmozd, @TafSarbar)
+            WHERE   d.HES_K = @KolWip AND d.HES_T IN (@TafDastmozd, @TafSarbar)
               AND   hd.DATE_S BETWEEN @DT1 AND @DT2
             GROUP BY TRY_CAST(d.HES_M AS BIGINT)
         ),
@@ -3712,10 +3742,12 @@ BEGIN
                     WHERE fx.UnitId = @UnitId AND TRY_CAST(fx.CODE AS BIGINT) = ca.CODE AND fx.IsFixed = 1
                 );
 
-        /* آستانه از CC_CheckRule، نه عددِ هاردکد. قاعده‌ي صاحب پروژه:
-           انحراف زير ۱۰۰۰ ريال صفر است. با سقفِ ده‌ميليونيِ قبلي،
-           اختلافِ نُه‌ميليوني ديده نمي‌شد و گامِ «جذب دستمزد صفر»
-           بي‌سروصدا ناتمام مي‌ماند. */
+        /* ⚠️ آستانه از CC_CheckRule مي‌آيد، نه عددِ هاردکد.
+           قبلاً ۱۰٬۰۰۰٬۰۰۰ ثابت بود؛ ولي قاعده‌ي صاحب پروژه اين است که
+           «انحراف زير ۱۰۰۰ ريال صفر حساب مي‌شود»، و او جذب دستمزد را در
+           گامِ سوم به صفر مي‌رساند — با سقفِ ده‌ميليوني، اختلافِ نُه‌ميليوني
+           هرگز ديده نمي‌شد و آن گام بي‌سروصدا ناتمام مي‌ماند.
+           پيش‌فرضِ ۱۰۰۰ با يک UPDATE روي Threshold قابل تغيير است. */
         DECLARE @thr08 FLOAT =
             ISNULL((SELECT Threshold FROM dbo.CC_CheckRule WHERE RuleCode = 'CHK-08'), 1000);
 
@@ -3724,7 +3756,7 @@ BEGIN
                 (RunId, StepCode, RuleCode, ExType, Severity, Amount, Description)
             VALUES (@RunId, 'S10', 'CHK-08', 10, 1, @absWipFixed - @absTotal,
                     CONCAT(N'اختلاف جذب: برگه‌هاي توليد ', FORMAT(@absTotal, 'N0'),
-                           N' در برابر حساب ۷۵۱ (بدونِ کارمزدی‌ها) ', FORMAT(@absWipFixed, 'N0')));
+                           N' در برابر حساب ', @KolWip, N' (بدونِ کارمزدی‌ها) ', FORMAT(@absWipFixed, 'N0')));
 
         ---- ۷) اعمال ضريب روي فرمول‌هاي کالاهاي توليدشده در اين واحد
         IF @WhatIf = 0 AND (@kWage <> 1 OR @kOh <> 1)
@@ -3776,7 +3808,7 @@ BEGIN
                             WHEN 1 THEN N'دستمزد'
                             ELSE N'سربار' END   AS نوع,
             c.AbsorbedAmount                    AS جذب_شده,
-            c.AbsorbedFromWip                   AS کنترل_از_751,
+            c.AbsorbedFromWip                   AS کنترل_از_حساب_ساخت,
             c.ActualAmount                      AS واقعي,
             c.AdjustFactor                      AS ضريب
     FROM    dbo.CC_ConversionCost c

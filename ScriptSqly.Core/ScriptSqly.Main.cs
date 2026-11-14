@@ -3333,6 +3333,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     BugSupportAgentScript(db); //Safir: گزارش خطا — «النا» پشتیبانِ هوش مصنوعی (BugReportAi، کارنامه و تنظیمات؛ پیش‌فرض خاموش)
                     ElenaAskScript(db); //Safir: «از النا بپرسید» — پرسش‌های مستقیمِ کاربران از النا (BugReportAiAsk)؛ سقفِ روزانه و میزِ کار
                     AiConfigToolLoopsScript(db); //Safir: مشاور ارشد — پیش‌فرضِ سقف مراحل ابزار (AI_Config.MaxToolLoops) از ۴ به ۱۰
+                    AiProvidersScript(db); //Safir: مشاور ارشد — چند اتصال (AI_Provider) و «کدام قابلیت با کدام اتصال و مدل» (AI_Route)
                 }
 
                 //1405/03/05

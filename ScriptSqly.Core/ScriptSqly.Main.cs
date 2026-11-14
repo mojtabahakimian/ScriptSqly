@@ -3334,6 +3334,8 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     ElenaAskScript(db); //Safir: «از النا بپرسید» — پرسش‌های مستقیمِ کاربران از النا (BugReportAiAsk)؛ سقفِ روزانه و میزِ کار
                     AiConfigToolLoopsScript(db); //Safir: مشاور ارشد — پیش‌فرضِ سقف مراحل ابزار (AI_Config.MaxToolLoops) از ۴ به ۱۰
                     StockReturnScript(db); //Safir: برگشت به انبار — TAGCOD 32/33، فرم‌های HAVALAH_RETURN*، و ورودِ ۳۲/۳۳ در نماهای قدیمیِ موجودی و کارت کالا
+                    AiProvidersScript(db); //Safir: مشاور ارشد — چند اتصال (AI_Provider) و «کدام قابلیت با کدام اتصال و مدل» (AI_Route)
+                    ExportProformaScript(db); //Safir: پیش‌فاکتور صادراتی — فرمِ HEAD_LST_PISHFROOSH_SADERATI، اطلاعاتِ صادراتی (PROFORMA_EXPORT) و ترجمه‌های چاپِ انگلیسی/عربی (EXPORT_*)
                 }
 
                 //1405/03/05

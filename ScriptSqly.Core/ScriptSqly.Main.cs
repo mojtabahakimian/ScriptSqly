@@ -3210,7 +3210,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                         SELECT CODE, ANBAR, CAST(MOGODI_A AS DECIMAL(38, 10)) AS V, 'Q' AS K FROM dbo.STUF_FSK WHERE @AnbarID IS NULL OR ANBAR = @AnbarID
                         UNION ALL
                         SELECT i.CODE, i.ANBAR,
-                               CAST(CASE WHEN i.TAG IN (1, 7, 9, 24) THEN i.MEGHk - i.MEGH_MAR
+                               CAST(CASE WHEN i.TAG IN (1, 7, 9, 24, 32, 33) THEN i.MEGHk - i.MEGH_MAR
                                          WHEN i.TAG = 22 THEN i.MEGH_MAR
                                          WHEN i.TAG IN (2, 5, 8, 10, 11, 26) THEN i.MEGH_MAR - i.MEGHk
                                          WHEN i.TAG = 30 OR i.TAG = 20 AND h.TAMIR IN (1, 4) THEN -i.MEGHk
@@ -3333,6 +3333,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     BugSupportAgentScript(db); //Safir: گزارش خطا — «النا» پشتیبانِ هوش مصنوعی (BugReportAi، کارنامه و تنظیمات؛ پیش‌فرض خاموش)
                     ElenaAskScript(db); //Safir: «از النا بپرسید» — پرسش‌های مستقیمِ کاربران از النا (BugReportAiAsk)؛ سقفِ روزانه و میزِ کار
                     AiConfigToolLoopsScript(db); //Safir: مشاور ارشد — پیش‌فرضِ سقف مراحل ابزار (AI_Config.MaxToolLoops) از ۴ به ۱۰
+                    StockReturnScript(db); //Safir: برگشت به انبار — TAGCOD 32/33، فرم‌های HAVALAH_RETURN*، و ورودِ ۳۲/۳۳ در نماهای قدیمیِ موجودی و کارت کالا
                 }
 
                 //1405/03/05
@@ -3665,7 +3666,7 @@ RETURN (
         -- خرید، برگشت فروش، تولید، سایر ورودی (TAG 1,7,9,24)
         SELECT i.CODE, SUM(i.MEGHk), SUM(i.MABL_K), i.ANBAR
         FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG IN (1, 7, 9, 24) AND h.DATE_N <= @dt2
+        WHERE i.TAG IN (1, 7, 9, 24, 32, 33) AND h.DATE_N <= @dt2
         GROUP BY i.CODE, i.ANBAR
         HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
 
@@ -3791,6 +3792,15 @@ RETURN (
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG IN (1, 7, 9, 24)
+
+        UNION ALL
+
+        -- برگشت به انبار (TAG 32/33): AVRAGE نرخِ منجمدِ خروج است؛ میانگینِ بعد از ورود در AVRAGE2
+        SELECT i.CODE, i.ANBAR, i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
+        FROM dbo.INVO_LST i
+             INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+             INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
+        WHERE h.DATE_N <= @dt2 AND i.TAG IN (32, 33)
 
         UNION ALL
 

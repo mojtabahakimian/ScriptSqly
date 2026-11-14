@@ -1307,7 +1307,7 @@ BEGIN
     LEFT    JOIN dbo.HEAD_LST inv ON pair.TagCode IS NOT NULL
                                  AND inv.TAG = pair.TagCode
                                  AND inv.NUMBER = h.NUMBER
-    WHERE   h.TAG IN (1, 2, 5, 9, 10, 11, 24, 26)
+    WHERE   h.TAG IN (1, 2, 5, 9, 10, 11, 24, 26, 32, 33)
       AND   h.DATE_N BETWEEN @DT1 AND @DT2
       AND   (h.N_S IS NULL OR h.N_S = 0)
       AND   (inv.N_S IS NULL OR inv.N_S = 0)
@@ -1379,7 +1379,7 @@ BEGIN
     FROM    dbo.INVO_LST il
     JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
     WHERE   hl.DATE_N BETWEEN @DT1 AND @DT2
-      AND   ((il.TAG IN (1, 7, 9, 24) AND il.AVRAGE < 0)
+      AND   ((il.TAG IN (1, 7, 9, 24, 32, 33) AND il.AVRAGE < 0)
           OR (il.TAG = 5 AND il.ANBARF IS NOT NULL AND il.AVRAGE2 < 0))
       AND   NOT EXISTS (SELECT 1 FROM dbo.CC_AcceptedException ae
                         WHERE ae.RuleCode = 'CHK-20' AND ae.IsActive = 1
@@ -2453,7 +2453,7 @@ BEGIN
             hl.DATE_N, hl.NUMBER, il.TAG, il.MEGHk AS Meghdar
     FROM    dbo.INVO_LST il
     JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
-    WHERE   il.TAG IN (1, 7, 9, 24)
+    WHERE   il.TAG IN (1, 7, 9, 24, 32, 33)
       AND   hl.DATE_N BETWEEN @DT1 AND @DT2;
 
     INSERT #PM
@@ -2724,7 +2724,7 @@ BEGIN
             SELECT  il.ANBAR AS Anbar, TRY_CAST(il.CODE AS BIGINT) AS code, il.MEGHk AS Meg
             FROM    dbo.INVO_LST il
             JOIN    dbo.HEAD_LST hl ON hl.TAG = il.TAG AND hl.NUMBER = il.NUMBER
-            WHERE   il.TAG IN (1, 7, 9, 24)
+            WHERE   il.TAG IN (1, 7, 9, 24, 32, 33)
               AND   hl.DATE_N <= @DT2
               AND   il.ANBAR IN (SELECT Anbar FROM dbo.CC_AnbarHes)
 
@@ -2833,6 +2833,17 @@ BEGIN
             JOIN    dbo.TAGCOD t ON il.TAG = t.CODE
             WHERE   hl.DATE_N <= @DT2
               AND   il.TAG IN (1, 7, 9, 24)
+              AND   il.ANBAR IN (SELECT Anbar FROM dbo.CC_AnbarHes)
+
+            UNION ALL
+            -- برگشت به انبار (TAG 32/33): AVRAGE نرخِ منجمدِ خروج است؛ میانگینِ بعد از ورود در AVRAGE2
+            SELECT  il.ANBAR, TRY_CAST(il.CODE AS BIGINT), il.AVRAGE2,
+                    hl.DATE_N, t.tartib, t.BARGAH, il.NUMBER, il.ID
+            FROM    dbo.INVO_LST il
+            JOIN    dbo.HEAD_LST hl ON il.NUMBER = hl.NUMBER AND il.TAG = hl.TAG
+            JOIN    dbo.TAGCOD t ON il.TAG = t.CODE
+            WHERE   hl.DATE_N <= @DT2
+              AND   il.TAG IN (32, 33)
               AND   il.ANBAR IN (SELECT Anbar FROM dbo.CC_AnbarHes)
 
             UNION ALL
@@ -6173,7 +6184,7 @@ RETURN (
         -- خرید، برگشت فروش، تولید، سایر ورودی (TAG 1,7,9,24)
         SELECT i.CODE, SUM(i.MEGHk), SUM(i.MABL_K), i.ANBAR
         FROM dbo.HEAD_LST h INNER JOIN dbo.INVO_LST i ON h.TAG = i.TAG AND h.NUMBER = i.NUMBER
-        WHERE i.TAG IN (1, 7, 9, 24) AND h.DATE_N <= @dt2
+        WHERE i.TAG IN (1, 7, 9, 24, 32, 33) AND h.DATE_N <= @dt2
         GROUP BY i.CODE, i.ANBAR
         HAVING i.ANBAR LIKE CAST(@ANBAR AS NVARCHAR(10))
 
@@ -6297,6 +6308,15 @@ RETURN (
              INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
              INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
         WHERE h.DATE_N <= @dt2 AND i.TAG IN (1, 7, 9, 24)
+
+        UNION ALL
+
+        -- برگشت به انبار (TAG 32/33): AVRAGE نرخِ منجمدِ خروج است؛ میانگینِ بعد از ورود در AVRAGE2
+        SELECT i.CODE, i.ANBAR, i.AVRAGE2, h.DATE_N, t.BARGAH, i.NUMBER, i.ID
+        FROM dbo.INVO_LST i
+             INNER JOIN dbo.HEAD_LST h ON i.NUMBER = h.NUMBER AND i.TAG = h.TAG
+             INNER JOIN dbo.TAGCOD t ON i.TAG = t.CODE
+        WHERE h.DATE_N <= @dt2 AND i.TAG IN (32, 33)
 
         UNION ALL
 
@@ -7728,7 +7748,7 @@ BEGIN
             -- ورودها
             SELECT il.ANBAR AS Anbar, TRY_CAST(il.CODE AS BIGINT) AS Code, il.MEGHk AS M
             FROM   dbo.INVO_LST il JOIN dbo.HEAD_LST h ON h.NUMBER=il.NUMBER AND h.TAG=il.TAG
-            WHERE  il.TAG IN (1,7,9,24) AND h.DATE_N <= @cut
+            WHERE  il.TAG IN (1,7,9,24,32,33) AND h.DATE_N <= @cut
             UNION ALL
             SELECT CAST(il.ANBARF AS INT), TRY_CAST(il.CODE AS BIGINT), il.MEGHk
             FROM   dbo.INVO_LST il JOIN dbo.HEAD_LST h ON h.NUMBER=il.NUMBER AND h.TAG=il.TAG
@@ -7760,6 +7780,13 @@ BEGIN
                 JOIN   dbo.HEAD_LST h ON h.NUMBER=il.NUMBER AND h.TAG=il.TAG
                 JOIN   dbo.TAGCOD t ON t.CODE=il.TAG
                 WHERE  il.TAG IN (1,7,9,24) AND h.DATE_N <= @cut
+                UNION ALL
+                -- برگشت به انبار (TAG 32/33): میانگینِ بعد از ورود در AVRAGE2
+                SELECT il.ANBAR, TRY_CAST(il.CODE AS BIGINT), il.AVRAGE2, h.DATE_N, t.tartib, il.NUMBER, il.ID
+                FROM   dbo.INVO_LST il
+                JOIN   dbo.HEAD_LST h ON h.NUMBER=il.NUMBER AND h.TAG=il.TAG
+                JOIN   dbo.TAGCOD t ON t.CODE=il.TAG
+                WHERE  il.TAG IN (32,33) AND h.DATE_N <= @cut
                 UNION ALL
                 SELECT CAST(il.ANBARF AS INT), TRY_CAST(il.CODE AS BIGINT),
                        il.AVRAGE2, h.DATE_N, t.tartib, il.NUMBER, il.ID

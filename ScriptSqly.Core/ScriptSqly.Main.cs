@@ -3337,6 +3337,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     AiProvidersScript(db); //Safir: مشاور ارشد — چند اتصال (AI_Provider) و «کدام قابلیت با کدام اتصال و مدل» (AI_Route)
                     ExportProformaScript(db); //Safir: پیش‌فاکتور صادراتی — فرمِ HEAD_LST_PISHFROOSH_SADERATI، اطلاعاتِ صادراتی (PROFORMA_EXPORT) و ترجمه‌های چاپِ انگلیسی/عربی (EXPORT_*)
                     EventFileViewScript(db); //Safir: اتوماسیون — چه کسی و کی پیوستِ رویدادِ یک کار را باز کرده (EVENT_FILE_VIEW)
+                    ProformaRemoteOkScript(db); //Safir: پیش‌فاکتور — تأیید یا رد از راه دور با واتس‌اپ و پیامک (PROFORMA_REMOTE_OK)
                 }
 
                 //1405/03/05

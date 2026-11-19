@@ -3342,6 +3342,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     ElenaAskClientScript(db); //Safir: «از النا بپرسید» — IP، مرورگر و شناسه‌ی دستگاهِ پرسنده (BugReportAiAsk.ClientIp، UserAgent و DeviceId)
                     EmailSendScript(db); //Safir: ارسال با ایمیل — فرمِ EMAIL_SEND و سوابقِ SAFIR_EMAIL_SENDS (کاربر، نشانی، سند، نتیجه)
                     EmailAuditScript(db); //Safir: سابقه‌ی محکمِ ارسال ایمیل (متن، اثرِ فایل، منبعِ نشانی) و SAFIR_MORINFO_LOG ِ تغییرِ «اطلاعات بیشتر» ِ مشتری
+                    CrmEmailScript(db); //Safir: ایمیلِ مشتریِ CRM — ستونِ EMAIL در COPMANES
                 }
 
                 //1405/03/05

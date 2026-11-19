@@ -3340,6 +3340,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     ProformaRemoteOkScript(db); //Safir: پیش‌فاکتور — تأیید یا رد از راه دور با واتس‌اپ و پیامک (PROFORMA_REMOTE_OK)
                     CrmSmsTemplatesScript(db); //Safir: پیامک‌های آماده CRM — کلیدِ CRMSMS و جدولِ CRM_SMS_TEMPLATE؛ کاربر فقط از پیام‌های مدیر انتخاب می‌کند
                     ElenaAskClientScript(db); //Safir: «از النا بپرسید» — IP، مرورگر و شناسه‌ی دستگاهِ پرسنده (BugReportAiAsk.ClientIp، UserAgent و DeviceId)
+                    EmailSendScript(db); //Safir: ارسال با ایمیل — فرمِ EMAIL_SEND و سوابقِ SAFIR_EMAIL_SENDS (کاربر، نشانی، سند، نتیجه)
                 }
 
                 //1405/03/05

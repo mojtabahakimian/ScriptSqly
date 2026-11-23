@@ -3345,6 +3345,7 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     CrmEmailScript(db); //Safir: ایمیلِ مشتریِ CRM — ستونِ EMAIL در COPMANES
                     Pay2LeaveEntryScript(db); //Safir: ثبت مرخصی پرسنل — فرمِ PAY2_LEAVE_ENTRY (کارگزینی بی دیدنِ حقوق و حکم)
                     FloatTafsiliScript(db); //Safir: تفصیلی شناور — شخصِ شناور (SAFIR_FLOAT_TAF) و ستونِ اتصالِ TDETA_HES.FLOAT_CODE
+                    FloatTafsiliLevelsScript(db); //Safir: تفصیلی شناور — ستونِ اتصالِ FLOAT_CODE روی تفصیلی‌های سطحِ ۲ تا ۴ (پرسنل)
                 }
 
                 //1405/03/05

@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.SqlClient;
+using Dapper;
+using Microsoft.Data.SqlClient;
 
 namespace ScriptSqly.Migrations
 {
@@ -12,6 +13,10 @@ namespace ScriptSqly.Migrations
         /// </summary>
         private static void LeaveRequiresApprovalScript(SqlConnection db)
         {
+            // PAY2_CONFIG is optional and absent in legacy MrCorrect databases.
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.PAY2_CONFIG', N'U') IS NULL THEN 0 ELSE 1 END") == 0)
+                return;
+
             ExecuteBatches(db, LeaveRequiresApprovalSql);
         }
 

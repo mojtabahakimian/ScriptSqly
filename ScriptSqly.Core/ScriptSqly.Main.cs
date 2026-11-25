@@ -3336,6 +3336,16 @@ WHERE NOT EXISTS (SELECT 1 FROM TCOD_Countries AS target WHERE target.[Code]=see
                     StockReturnScript(db); //Safir: برگشت به انبار — TAGCOD 32/33، فرم‌های HAVALAH_RETURN*، و ورودِ ۳۲/۳۳ در نماهای قدیمیِ موجودی و کارت کالا
                     AiProvidersScript(db); //Safir: مشاور ارشد — چند اتصال (AI_Provider) و «کدام قابلیت با کدام اتصال و مدل» (AI_Route)
                     ExportProformaScript(db); //Safir: پیش‌فاکتور صادراتی — فرمِ HEAD_LST_PISHFROOSH_SADERATI، اطلاعاتِ صادراتی (PROFORMA_EXPORT) و ترجمه‌های چاپِ انگلیسی/عربی (EXPORT_*)
+                    EventFileViewScript(db); //Safir: اتوماسیون — چه کسی و کی پیوستِ رویدادِ یک کار را باز کرده (EVENT_FILE_VIEW)
+                    ProformaRemoteOkScript(db); //Safir: پیش‌فاکتور — تأیید یا رد از راه دور با واتس‌اپ و پیامک (PROFORMA_REMOTE_OK)
+                    CrmSmsTemplatesScript(db); //Safir: پیامک‌های آماده CRM — کلیدِ CRMSMS و جدولِ CRM_SMS_TEMPLATE؛ کاربر فقط از پیام‌های مدیر انتخاب می‌کند
+                    ElenaAskClientScript(db); //Safir: «از النا بپرسید» — IP، مرورگر و شناسه‌ی دستگاهِ پرسنده (BugReportAiAsk.ClientIp، UserAgent و DeviceId)
+                    EmailSendScript(db); //Safir: ارسال با ایمیل — فرمِ EMAIL_SEND و سوابقِ SAFIR_EMAIL_SENDS (کاربر، نشانی، سند، نتیجه)
+                    EmailAuditScript(db); //Safir: سابقه‌ی محکمِ ارسال ایمیل (متن، اثرِ فایل، منبعِ نشانی) و SAFIR_MORINFO_LOG ِ تغییرِ «اطلاعات بیشتر» ِ مشتری
+                    CrmEmailScript(db); //Safir: ایمیلِ مشتریِ CRM — ستونِ EMAIL در COPMANES
+                    Pay2LeaveEntryScript(db); //Safir: ثبت مرخصی پرسنل — فرمِ PAY2_LEAVE_ENTRY (کارگزینی بی دیدنِ حقوق و حکم)
+                    FloatTafsiliScript(db); //Safir: تفصیلی شناور — شخصِ شناور (SAFIR_FLOAT_TAF) و ستونِ اتصالِ TDETA_HES.FLOAT_CODE
+                    FloatTafsiliLevelsScript(db); //Safir: تفصیلی شناور — ستونِ اتصالِ FLOAT_CODE روی تفصیلی‌های سطحِ ۲ تا ۴ (پرسنل)
                 }
 
                 //1405/03/05
